@@ -233,58 +233,15 @@ const DEFAULTS = { ...CONFIG };
    The bottom row of letters sits right on the floor.
    Rows must all be the same length. Add more rows for taller levels.
 
-   You can also pick which tune plays! Add  song: 0  (or 1, 2, 3...) to a
-   level to choose from the SONGS list in music.js. Leave it out and each
-   level just uses the next song in the list.
+   You can also pick which tune plays! Each level remembers a  song  number
+   (0, 1, 2...) that chooses from the SONGS list in music.js.
+   ================================================================
+   Levels no longer live in this file! They now live on the server, in
+   data/levels.json, and the game downloads them when it starts up (see
+   init() near the bottom). The kids build levels in the editor and tap
+   "Save to server", so everyone shares the same list of levels.
+   The letters above still describe exactly how a level is drawn.
    ================================================================ */
-
-const LEVELS = [
-{
-  name: "First Steps",
-  song: 0,                 // "Hyper Hop"
-  level: `
-......................................................................
-......................................................................
-................................*.....................................
-.......................................###...............*............
-...................^.......^....###...###....o......^^...##..........|
-`,
-},
-{
-  name: "Spike Alley",
-  song: 1,                 // "Sky Runner"
-  level: `
-..........................................................................
-.......................*.....................*............................
-...................................o................####..................
-......................###.......^..........####.....####.....*............
-................^^....###...^^..^....^^^...####..^^..####...###..^^^.....|
-`,
-},
-{
-  name: "Bounce House",
-  song: 2,                 // "Bounce Party"
-  level: `
-..............................................................................
-.......................*..................*...................*...............
-......................####..............####................####..............
-......................####....*.........####................####..............
-..............o.......####....o..........####......o........####......o......|
-`,
-},
-{
-  name: "Getting Better",
-  song: 3,                 // "Boss Rush"
-  level: `
-..................................................
-..................................................
-..................................................
-..................................................
-...............^........................#.........
-.............###^...^^....#^^#^^#.....^...^....|..
-`,
-},
-];
 
 /* ================================================================
    Everything below here is the game engine. You can read it,
@@ -741,16 +698,61 @@ function showScreen(id) {
   }
 }
 
+/* ================================================================
+   ================  TALKING TO THE SERVER  ========================
+   ================================================================
+   The game downloads its levels and shared settings from the little
+   server (server.js) when it starts. Everything the game asks for
+   goes through these helpers. */
+
+// Where the API lives. We work this out from the page's own address so
+// the game runs the same whether it's at the top of the site, in a
+// subfolder, or on a custom port — no editing needed.
+const API_BASE = new URL(".", document.baseURI).pathname + "api";
+
+// The levels we downloaded from the server (the editor's Edit buttons use this).
+let serverLevels = [];
+
+// Ask the server for something and get back the answer as data.
+async function apiGet(path) {
+  const res = await fetch(API_BASE + path);
+  if (!res.ok) throw new Error("Server said " + res.status);
+  return res.json();
+}
+
+// Copy the server's saved settings ON TOP OF our CONFIG defaults, so a
+// change saved "for everyone" shows up for every player. DEFAULTS was
+// captured earlier, so "Reset to defaults" still brings back the code numbers.
+function applySettings(overrides) {
+  for (const [key, value] of Object.entries(overrides || {})) {
+    if (key in CONFIG) CONFIG[key] = value;
+  }
+}
+
 // menu buttons
 const list = document.getElementById("levelList");
-LEVELS.forEach((L, i) => {
-  const b = document.createElement("button");
-  b.className = "btn green"; b.textContent = (i + 1) + ". " + L.name;
-  // Each level plays its own tune: the level's `song`, or the next one in the list.
-  const songIndex = (L.song !== undefined) ? L.song : (i % SONGS.length);
-  b.onclick = () => startLevel(parseLevel(L.level), false, document.getElementById("practiceChk").checked, songIndex);
-  list.appendChild(b);
-});
+function buildMenu(levels) {
+  list.innerHTML = "";
+  if (!levels.length) {
+    list.innerHTML = '<div style="color:#fff;font-weight:bold">No levels yet — tap the Level Editor to make one!</div>';
+    return;
+  }
+  levels.forEach((L, i) => {
+    const b = document.createElement("button");
+    b.className = "btn green";
+    b.textContent = (i + 1) + ". " + L.name + (L.author ? "  — " + L.author : "");
+    // Each level plays its own tune: the level's `song`, or the next one in the list.
+    const songIndex = (L.song !== undefined && L.song !== null) ? L.song : (i % SONGS.length);
+    b.onclick = () => startLevel(parseLevel(L.level), false, document.getElementById("practiceChk").checked, songIndex);
+    list.appendChild(b);
+  });
+}
+
+// Show a friendly note on the menu (used when the server can't be reached).
+function menuMessage(msg) {
+  list.innerHTML = '<div style="color:#fff;font-weight:bold;max-width:80vw;text-align:center">' + msg + '</div>';
+}
+
 document.getElementById("openEditorBtn").onclick = () => { S.screen = "editor"; showScreen("editorScreen"); drawEditor(); };
 
 /* ================================================================
@@ -999,6 +1001,28 @@ document.getElementById("importBtn").onclick = () => {
 };
 document.getElementById("loadBtn").onclick = () => importLevel(document.getElementById("importText").value);
 document.getElementById("closeImportBtn").onclick = () => document.getElementById("importBox").classList.add("hidden");
+
+/* ================================================================
+   ========================  START UP  =============================
+   ================================================================
+   When the page loads we download the shared settings and the list of
+   levels from the server, then build the menu. If the server can't be
+   reached we say so instead of showing a blank screen. */
+async function init() {
+  try {
+    const [settings, levels] = await Promise.all([
+      apiGet("/settings"),
+      apiGet("/levels"),
+    ]);
+    applySettings(settings);       // shared "Save for everyone" numbers
+    serverLevels = levels;
+    buildMenu(levels);
+  } catch (e) {
+    console.error(e);
+    menuMessage("Can't reach the game server. Make sure it's running, then reload.");
+  }
+}
+init();
 
 </script>
 </body>
