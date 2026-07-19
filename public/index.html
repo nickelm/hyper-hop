@@ -314,6 +314,8 @@ const CONFIG = {
   GRAVITY: 5000,          // how hard the cube falls. Moon = 1500, Earth = 5000, Jupiter = 12000
   JUMP_POWER: 950,        // how strong a jump is. Bigger number = higher jump
   PAD_POWER: 1350,        // how strong the yellow bounce pads are
+  SMALL_PAD_POWER: 850,   // how strong the little pink pads ( p ) are — a gentler hop
+  CATAPULT_POWER: 2000,   // how strong a catapult ( U ) flings you — a giant launch!
   SPIN_SPEED: 480,        // how fast the cube spins in the air (degrees per second)
 
   // ---------- RAMPS (the slopes  /  and  \  ) ----------
@@ -335,6 +337,8 @@ const CONFIG = {
   BLOCK_EDGE: "#ffffff",       // outline on top of blocks
   SPIKE_COLOR: "#ff4d6d",      // the deadly triangles
   PAD_COLOR: "#ffe14d",        // bounce pads
+  SMALL_PAD_COLOR: "#ff7ed4",  // the little pink pads ( p )
+  CATAPULT_COLOR: "#ffd21a",   // the catapult bucket ( U )
   COIN_COLOR: "#ffd700",       // collectible coins
   GROUND_COLOR: "#222252",     // the floor
   SKY_TOP: "#1a0533",          // background gradient, top...
@@ -484,6 +488,8 @@ function normalizeSkin(raw) {
        |  = finish line (you win!)
        =  = jump-through platform (land on top; jump up through it from below; never deadly)
        -  = disappearing bridge (works like = , but fades away once you run past it)
+       p  = small pad (a gentle bounce — like o but smaller)
+       U  = catapult (flings you way up high!)
 
    The floor is automatic — you do not need to draw it.
    The bottom row of letters sits right on the floor.
@@ -546,6 +552,8 @@ const sfx = {
   coin:  () => { beep(900, 0.08, "sine", 0.15); setTimeout(() => beep(1400, 0.12, "sine", 0.15), 70); },
   death: () => beep(180, 0.4, "sawtooth", 0.2, -120),
   win:   () => [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.18, "square", 0.12), i * 110)),
+  // Catapult: a big rising WHOOOMP then a bright pop — nothing else sounds like it.
+  catapult: () => { beep(150, 0.32, "sawtooth", 0.22, 950); setTimeout(() => beep(760, 0.16, "square", 0.16, 400), 130); },
 };
 
 // ---------------- Game state ----------------
@@ -560,6 +568,7 @@ let beatPulse = 0;      // 0..1, jumps to 1 on the beat then fades (for the beat
 let profiles = [];        // every saved player, from the server: {id, name, skin}
 let currentProfile = null;// who is playing right now; null means "nobody picked" (default cube)
 let bridgeFades = {};   // "col,row" -> how visible a  -  bridge still is (1 = solid, 0 = gone). Cosmetic only.
+let squash = 0;         // brief squash-and-stretch on the cube after a catapult launch (1 = full, 0 = none). Cosmetic.
 
 // The music calls this on every step. There are 2 steps per beat, so the
 // even ones (0, 2, 4...) are the beats — that's when we flash the world.
@@ -592,6 +601,7 @@ function resetRun() {
   runPercent = 0; runWasBest = false;
   coinsGot = new Set();
   bridgeFades = {};                    // every  -  bridge is solid again at the start of a run
+  squash = 0;                          // no leftover catapult stretch
   totalCoins = 0;
   for (const row of S.level.grid) for (const c of row) if (c === "*") totalCoins++;
   // Restart the tune from the very beginning so obstacles line up with the
@@ -722,6 +732,15 @@ function physicsStep(dt) {
       } else if (ch === "o") {
         if (overlapX && player.y + half > ty + T * 0.4) {
           player.vy = -CONFIG.PAD_POWER; player.onGround = false; sfx.pad();
+        }
+      } else if (ch === "p") {                          // small pink pad — a gentler bounce
+        if (overlapX && player.y + half > ty + T * 0.4) {
+          player.vy = -CONFIG.SMALL_PAD_POWER; player.onGround = false; sfx.pad();
+        }
+      } else if (ch === "U") {                          // catapult — a giant launch + a squash-stretch
+        if (overlapX && player.y + half > ty + T * 0.4) {
+          player.vy = -CONFIG.CATAPULT_POWER; player.onGround = false; sfx.catapult();
+          squash = 1;                                   // kick off the cosmetic squash-and-stretch
         }
       } else if (ch === "*") {
         const key = col + "," + row;
@@ -1071,6 +1090,18 @@ function draw(dt) {
         ctx.beginPath(); ctx.ellipse(x + T/2, y + T - 6, T/2 - 3, 8, 0, Math.PI, 0);
         ctx.fill();
         ctx.fillRect(x + 3, y + T - 8, T - 6, 5);
+      } else if (ch === "p") {                    // small pink pad — like o but smaller
+        ctx.fillStyle = CONFIG.SMALL_PAD_COLOR;
+        ctx.beginPath(); ctx.ellipse(x + T/2, y + T - 5, T/4, 5, 0, Math.PI, 0);
+        ctx.fill();
+        ctx.fillRect(x + T/4, y + T - 6, T/2, 4);
+      } else if (ch === "U") {                    // catapult — a wide yellow bucket
+        ctx.fillStyle = CONFIG.CATAPULT_COLOR;
+        ctx.fillRect(x + 3, y + T - 6, T - 6, 5);         // base
+        ctx.fillRect(x + 3, y + T/3, 5, T - T/3);         // left wall
+        ctx.fillRect(x + T - 8, y + T/3, 5, T - T/3);     // right wall
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;      // a little rim so it reads as a bucket
+        ctx.strokeRect(x + 3, y + T/3, T - 6, T - T/3 - 1);
       } else if (ch === "*") {
         if (coinsGot.has(col + "," + row)) continue;
         const bob = Math.sin(performance.now() / 250 + col) * 4;
@@ -1130,9 +1161,18 @@ function draw(dt) {
   // trail — the skin picks the style; CONFIG.TRAIL is still the master switch
   drawTrail(ctx, sx, sy, skin, dt, trail, player.dead);
 
-  // player
+  // player — with a quick squash-and-stretch right after a catapult launch
+  if (squash > 0) squash = Math.max(0, squash - dt * 4);   // fades out in about a quarter second
   if (!player.dead) {
-    drawPlayer(ctx, sx(player.x), sy(player.y), player.rot, skin);
+    if (squash > 0) {                                      // stretch tall + thin, like a real launch
+      ctx.save();
+      ctx.translate(sx(player.x), sy(player.y));
+      ctx.scale(1 - squash * 0.3, 1 + squash * 0.45);
+      drawPlayer(ctx, 0, 0, player.rot, skin);
+      ctx.restore();
+    } else {
+      drawPlayer(ctx, sx(player.x), sy(player.y), player.rot, skin);
+    }
   }
 
   // particles (the death explosion) — each piece carries its own style/color
@@ -2105,6 +2145,9 @@ const TOOLS = [
   { sep: true },                                      // ---- platforms ----
   { ch: "=", icon: "\u2550", label: "platform" },    // \u2550 double line = jump-through platform
   { ch: "-", icon: "\u2509", label: "bridge" },      // \u2509 dashed line = disappearing bridge
+  { sep: true },                                      // ---- boosts ----
+  { ch: "p", icon: "\u2022", label: "small pad" },   // \u2022 small dot = little pink pad
+  { ch: "U", icon: "\u222a", label: "catapult" },    // \u222a bucket = catapult
 ];
 const paletteEl = document.getElementById("palette");
 TOOLS.forEach(t => {
@@ -2155,6 +2198,13 @@ function drawEditor() {
       eCtx.fillStyle = CONFIG.BLOCK_COLOR;
       const plank = (c - 8) / 3;
       for (let p = 0; p < 3; p++) eCtx.fillRect(x + 2 + p * (plank + 2), y + 2, plank, c/3);
+    }
+    else if (ch === "p") { eCtx.fillStyle = CONFIG.SMALL_PAD_COLOR; eCtx.fillRect(x+c/3, y+c-8, c/3, 5); }
+    else if (ch === "U") {   // a little yellow bucket
+      eCtx.fillStyle = CONFIG.CATAPULT_COLOR;
+      eCtx.fillRect(x+3, y+c-6, c-6, 4);            // base
+      eCtx.fillRect(x+3, y+c/3, 4, c-c/3);          // left wall
+      eCtx.fillRect(x+c-7, y+c/3, 4, c-c/3);        // right wall
     }
   }
   // floor hint

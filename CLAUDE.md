@@ -56,6 +56,8 @@ o  bounce pad (launches upward at CONFIG.PAD_POWER)
 |  finish line
 =  jump-through platform (thin slab; land on top, pass through from below/sides; never deadly)
 -  disappearing bridge (same physics as `=`; fades away once passed, CONFIG.BRIDGE_FADE_TIME; cosmetic)
+p  small bounce pad (like `o`, gentler, CONFIG.SMALL_PAD_POWER; pink)
+U  catapult (a huge launch at CONFIG.CATAPULT_POWER; yellow bucket, dramatic sound + cosmetic squash-stretch)
 ```
 
 Jump-through platforms (`=` `-`) are one-way: the cube lands on the top when
