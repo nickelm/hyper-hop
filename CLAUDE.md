@@ -5,8 +5,14 @@
 Hyper Hop is a Geometry Dash-style auto-runner: a cube scrolls right automatically,
 tap/space to jump, spikes kill you, reach the finish flag. It is a family project
 built by a professor and two 9-year-old co-developers (his son and his son's friend),
-who own level design and parameter tuning. It runs as a single static web page on
-iPad and Android tablet browsers, deployed via GitHub Pages.
+who own level design and parameter tuning. It plays in iPad and Android tablet
+browsers.
+
+It is now a small **client–server app**: a vanilla HTML/CSS/JS game (in `public/`)
+talking to a tiny **Node + Express** server that stores everyone's levels and shared
+settings in flat JSON files. This lets the kids save levels and settings straight
+from their tablets, no laptop or git in the loop. It runs on a DigitalOcean droplet
+(see `deploy/`).
 
 ## Non-negotiable conventions
 
@@ -17,10 +23,15 @@ iPad and Android tablet browsers, deployed via GitHub Pages.
 2. **All tunables live in `CONFIG`.** Never hardcode a magic number in the engine
    if it could be a named constant in the CONFIG block at the top of the file.
    When adding a feature, add its parameters to CONFIG with a kid-friendly comment.
-3. **No build step, no frameworks, no dependencies.** Vanilla HTML/CSS/JS, canvas
-   rendering. The whole game must work by opening `index.html` from a static server.
-4. **No localStorage or sessionStorage.** Levels are saved by exporting ASCII text
-   and pasting it into `levels.js`, on purpose: the kids' levels flow through git.
+3. **The client stays vanilla — no build step, no frameworks, no client
+   dependencies.** Everything in `public/` is plain HTML/CSS/JS with canvas
+   rendering; it must run by opening `public/index.html` (served over HTTP). The
+   *server* (`server.js`) is allowed exactly one dependency, Express, and no build
+   step either — plain `node server.js`.
+4. **No localStorage or sessionStorage in the client.** Levels and shared settings
+   now live on the server (`data/levels.json`, `data/settings.json`) and are reached
+   through the API below; the family PIN is held only in a JS variable for the
+   session. The editor's "Copy code" export stays as a manual backup path.
 5. **Touch-first.** Every feature must work with taps on a tablet. Keyboard support
    is secondary. Keep `touch-action: none` and pointer events intact.
 
@@ -44,30 +55,67 @@ plane. Rows are top-to-bottom; all rows in a level must be the same length.
 
 ## Architecture
 
-- `index.html` — everything: styles, CONFIG, engine, editor. (Planned: split
-  levels into `levels.js` so the kids have a file of their own.)
-- Engine: fixed-timestep physics at 240 Hz (`FIXED_DT`), decoupled from
-  rendering, so all tablets play identically. Rendering uses one full-screen
-  canvas; camera places the floor at 78% of screen height.
-- World coordinates: floor at y = 0, up is negative y. `parseLevel()` turns an
-  ASCII string into `{grid, cols, rows}`.
-- Built-in level editor: tap-to-paint grid, playtest button, and a "Copy code"
-  export that emits a paste-ready `LEVELS` entry.
-- Sound: tiny WebAudio synth (`beep()`), created lazily on first interaction.
+Files:
+
+- `server.js` — the Node + Express server. Serves `public/`, exposes the API
+  below, validates levels, gates writes behind the family PIN, and backs up each
+  data file before changing it. No database — just JSON files in `data/`.
+- `public/index.html` — the whole client: styles, CONFIG, engine, editor, and the
+  Control Panel. On load it fetches settings + levels from the server.
+- `public/music.js` — the chiptune synth (`Music`) and the `SONGS` list.
+- `data/` — runtime state, created/seeded on first run and **gitignored**:
+  - `levels.json` — array of `{id, name, author, level, song, updatedAt}`.
+  - `settings.json` — CONFIG overrides saved "for everyone" (a flat subset).
+  - `backups/` — timestamped copies of the above, newest 200 kept per file.
+- `deploy/` — `hyper-hop.service` (systemd), `Caddyfile` (HTTPS reverse proxy),
+  and `SETUP.md` (droplet instructions).
+
+Engine (unchanged): fixed-timestep physics at 240 Hz (`FIXED_DT`), decoupled from
+rendering, so all tablets play identically. One full-screen canvas; camera places
+the floor at 78% of screen height. World coordinates: floor at y = 0, up is
+negative y. `parseLevel()` turns an ASCII string into `{grid, cols, rows}`.
+
+The client works out its API base from the page URL (`API_BASE`), so it runs the
+same at the site root, in a subfolder, or on a custom port.
+
+## The API
+
+All reads are open. All **mutations require the header `X-Family-Pin`** matching the
+server's `FAMILY_PIN` env var, and are refused with a friendly 403 when
+`READ_ONLY=true`.
+
+| Method | Path                | What it does                          |
+| ------ | ------------------- | ------------------------------------- |
+| GET    | `/api/levels`       | all levels                            |
+| POST   | `/api/levels`       | create a level (server assigns `id`)  |
+| PUT    | `/api/levels/:id`   | update a level                        |
+| DELETE | `/api/levels/:id`   | delete a level                        |
+| GET    | `/api/settings`     | current CONFIG overrides              |
+| PUT    | `/api/settings`     | replace CONFIG overrides              |
+
+Server-side level validation (returns clear messages): only the characters
+`. # ^ o * |`, all rows equal length, at most one `|`, ≤ 500 columns, ≤ 30 rows.
+
+Env vars: `PORT` (default 3000), `FAMILY_PIN` (default `1234` for local dev, with a
+warning — always set a real one in production), `READ_ONLY` (`true` freezes writes).
 
 ## Workflow
 
-- Development happens in VS Code on the professor's laptop; the kids playtest on
-  tablets over the LAN (`python3 -m http.server`) during sessions, and via the
-  GitHub Pages URL between sessions.
-- Kids build levels in the in-game editor on tablets, tap "Copy code", and the
-  exported string gets pasted into the levels list and committed.
+- Run locally with `npm install` then `FAMILY_PIN=1234 node server.js`, and open
+  `http://localhost:3000`. During sessions the kids reach the laptop over the LAN
+  (`http://<laptop-ip>:3000`); between sessions they use the droplet URL.
+- Kids build levels in the in-game editor and tap **Save to server** (it asks for a
+  name + author once, then the family PIN once per session). Shared tuning is saved
+  from the Control Panel's **Save for everyone**. Both persist server-side and are
+  backed up automatically — no git round-trip needed for levels.
 - When the kids are present, explain changes as you make them; small readable
   diffs beat clever refactors.
 
 ## Testing checklist before any commit
 
-- Game loads with no console errors from a plain static server.
+- `node server.js` starts clean and the game loads with no console errors.
 - All shipped levels are completable (play or reason through them).
 - Jump, pad bounce, spike death, coin pickup, and finish all work by tap alone.
-- The CONFIG block still sits at the top of the file with all comments intact.
+- Save to server, Edit, and Save for everyone work by touch; a wrong PIN re-prompts.
+- `READ_ONLY=true` refuses writes with the friendly message; reads still work.
+- The CONFIG block still sits at the top of `public/index.html`, comments intact.
