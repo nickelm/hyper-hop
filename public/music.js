@@ -93,6 +93,7 @@ const Music = (() => {
   let ctx = null, master = null;
   let timer = null, nextStepTime = 0, step = 0;
   let song = SONGS[0];                            // the song playing right now
+  let bpmOverride = 0;                            // 0 = each song keeps its own BPM; otherwise force this beat
   const LOOKAHEAD_MS = 25, SCHEDULE_AHEAD = 0.12;
 
   const NOTE_INDEX = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
@@ -159,7 +160,8 @@ const Music = (() => {
   }
 
   function tick() {
-    const stepDur = 60 / song.BPM / 2;              // 2 steps per beat (eighths)
+    const bpm = bpmOverride || song.BPM;            // the "Music speed" setting can force a beat
+    const stepDur = 60 / bpm / 2;                   // 2 steps per beat (eighths)
     while (nextStepTime < ctx.currentTime + SCHEDULE_AHEAD) {
       playStep(step, nextStepTime, stepDur);
       nextStepTime += stepDur;
@@ -199,6 +201,9 @@ const Music = (() => {
       MUSIC.VOLUME = v;
       if (master) master.gain.value = v * 0.5;
     },
+    // Force every song to a chosen beat (BPM). Pass 0 to let each song keep
+    // its own speed. Takes effect on the next steps, even mid-song.
+    setBpm(v) { bpmOverride = Number(v) || 0; },
     stop() { if (timer) { clearInterval(timer); timer = null; } },
   };
 })();

@@ -91,7 +91,10 @@
   .ctrl input[type=range] { width: 100%; height: 30px; accent-color: #3ec6ff; }
   .ctrl.toggle .row { cursor: pointer; }
   .ctrl input[type=checkbox] { width: 28px; height: 28px; accent-color: #7dff5e; }
-  #panelBottom { display: flex; gap: 8px; justify-content: center; }
+  #panelBottom { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  #panelHint { color: rgba(255,255,255,.75); font-size: 13px; text-align: center; padding: 0 4px; }
+  .ctrl input[type=color] { width: 100%; height: 34px; border: 2px solid #555a8a; border-radius: 8px;
+    background: #1e1e40; padding: 2px; }
 </style>
 </head>
 <body>
@@ -115,6 +118,7 @@
 
 <!-- ======================= MENU ======================= -->
 <div id="menuScreen" class="screen">
+  <button class="btn small" id="menuGearBtn" style="position:absolute;top:12px;right:12px">&#9881; Settings</button>
   <h1>HYPER HOP</h1>
   <div class="levelList" id="levelList"></div>
   <label class="practiceRow"><input type="checkbox" id="practiceChk"> Practice mode (checkpoints)</label>
@@ -124,10 +128,14 @@
 <!-- ======================= CONTROL PANEL ======================= -->
 <div id="controlPanel" class="hidden">
   <h2>&#9881; Control Panel</h2>
+  <div id="panelHint">Changes are just for you until you tap <b>Save for everyone</b>.
+    &#9733; = one of the settings that gets shared with all players.</div>
   <div id="panelControls"></div>
   <div id="panelBottom">
-    <button class="btn small" id="resetCfgBtn">Reset to defaults</button>
-    <button class="btn green small" id="closePanelBtn">Close &amp; play</button>
+    <button class="btn green small" id="saveEveryoneBtn">&#9733; Save for everyone</button>
+    <button class="btn small" id="resetCfgBtn">Reset (just me)</button>
+    <button class="btn small" id="resetEveryoneBtn">Reset for everyone</button>
+    <button class="btn green small" id="closePanelBtn">Close</button>
   </div>
 </div>
 
@@ -243,6 +251,7 @@ const CONFIG = {
   SOUND: true,            // beeps and boops (jump, coin, death)? true or false
   MUSIC: true,            // background music from music.js? true or false
   MUSIC_VOLUME: 0.5,      // how loud the music is (0 = off, 1 = loud)
+  MUSIC_BPM: 0,           // music speed. 0 = each song keeps its own speed; any other number forces that beat
   BEAT_PULSE: true,       // make the world flash gently on the beat? true or false
 };
 
@@ -706,6 +715,7 @@ window.addEventListener("keydown", e => {
 // In-game buttons
 document.getElementById("backBtn").onclick = leaveGame;
 document.getElementById("gearBtn").onclick = openPanel;
+document.getElementById("menuGearBtn").onclick = openPanel;
 document.getElementById("dropCpBtn").onclick = dropCheckpoint;
 document.getElementById("removeCpBtn").onclick = removeCheckpoint;
 
@@ -762,6 +772,8 @@ function applySettings(overrides) {
   for (const [key, value] of Object.entries(overrides || {})) {
     if (key in CONFIG) CONFIG[key] = value;
   }
+  // The music speed lives inside music.js, so hand it the shared value.
+  if (typeof Music !== "undefined") Music.setBpm(CONFIG.MUSIC_BPM);
 }
 
 // The family PIN, remembered ONLY for this visit (never saved to the device,
@@ -886,6 +898,13 @@ const PANEL_SLIDERS = [
   ["SPIKE_MERCY",  "Spike mercy",  0, 0.5, 0.05],
   ["SCREEN_SHAKE", "Screen shake", 0, 30, 1],
   ["MUSIC_VOLUME", "Music volume", 0, 1, 0.05],
+  ["MUSIC_BPM",    "Music speed (0 = each song's own)", 0, 200, 1],
+];
+// Each color picker: [CONFIG name, label]
+const PANEL_COLORS = [
+  ["PLAYER_COLOR", "Cube color"],
+  ["SKY_TOP",      "Sky top color"],
+  ["SKY_BOTTOM",   "Sky bottom color"],
 ];
 // Each switch: [CONFIG name, label]
 const PANEL_TOGGLES = [
@@ -894,6 +913,14 @@ const PANEL_TOGGLES = [
   ["MUSIC", "Music"],
   ["BEAT_PULSE", "Beat pulse"],
 ];
+// The settings that "Save for everyone" shares with all players (marked ★
+// in the panel). Everything else in the panel is just for this visit.
+const SHARED_KEYS = [
+  "SCROLL_SPEED", "GRAVITY", "JUMP_POWER", "PAD_POWER", "SPIKE_MERCY",
+  "PLAYER_COLOR", "SKY_TOP", "SKY_BOTTOM", "SOUND", "MUSIC", "MUSIC_BPM",
+];
+const sharedSet = new Set(SHARED_KEYS);
+const star = key => (sharedSet.has(key) ? "★ " : "");
 
 const panelControlsEl = document.getElementById("panelControls");
 function buildPanel() {
@@ -902,7 +929,7 @@ function buildPanel() {
     const wrap = document.createElement("div");
     wrap.className = "ctrl";
     wrap.innerHTML =
-      '<div class="row"><span>' + label + '</span><span class="val"></span></div>' +
+      '<div class="row"><span>' + star(key) + label + '</span><span class="val"></span></div>' +
       '<input type="range" min="' + min + '" max="' + max + '" step="' + step + '">';
     const slider = wrap.querySelector("input");
     const valEl = wrap.querySelector(".val");
@@ -911,16 +938,28 @@ function buildPanel() {
     slider.addEventListener("input", () => {
       CONFIG[key] = Number(slider.value);
       valEl.textContent = slider.value;
-      // Music volume is special: change it live while the song plays.
+      // A couple of settings change the music live while the song plays.
       if (key === "MUSIC_VOLUME") Music.setVolume(CONFIG.MUSIC_VOLUME);
+      if (key === "MUSIC_BPM") Music.setBpm(CONFIG.MUSIC_BPM);
     });
+    panelControlsEl.appendChild(wrap);
+  }
+  for (const [key, label] of PANEL_COLORS) {
+    const wrap = document.createElement("div");
+    wrap.className = "ctrl";
+    wrap.innerHTML =
+      '<div class="row"><span>' + star(key) + label + '</span></div>' +
+      '<input type="color">';
+    const picker = wrap.querySelector("input");
+    picker.value = CONFIG[key];
+    picker.addEventListener("input", () => { CONFIG[key] = picker.value; });
     panelControlsEl.appendChild(wrap);
   }
   for (const [key, label] of PANEL_TOGGLES) {
     const wrap = document.createElement("div");
     wrap.className = "ctrl toggle";
     wrap.innerHTML =
-      '<label class="row"><span>' + label + '</span>' +
+      '<label class="row"><span>' + star(key) + label + '</span>' +
       '<input type="checkbox"' + (CONFIG[key] ? " checked" : "") + '></label>';
     const box = wrap.querySelector("input");
     box.addEventListener("change", () => {
@@ -933,10 +972,12 @@ function buildPanel() {
 }
 
 function isPanelOpen() { return !document.getElementById("controlPanel").classList.contains("hidden"); }
+// The panel opens from the menu (gear on the title screen) OR mid-game (gear
+// in the corner). In a game we pause; the Close button's words fit where we are.
 function openPanel() {
-  if (S.screen !== "game") return;
-  S.paused = true;
+  if (S.screen === "game") S.paused = true;
   buildPanel();                 // fill in the sliders with the current numbers
+  document.getElementById("closePanelBtn").textContent = (S.screen === "game") ? "Close & play" : "Close";
   document.getElementById("controlPanel").classList.remove("hidden");
 }
 function closePanel() {
@@ -944,9 +985,39 @@ function closePanel() {
   if (S.screen === "game") S.paused = false;
 }
 document.getElementById("closePanelBtn").onclick = closePanel;
+
+// Put the live music settings back in step with CONFIG after a reset.
+function applyMusicSettings() {
+  Music.setVolume(CONFIG.MUSIC_VOLUME);
+  Music.setBpm(CONFIG.MUSIC_BPM);
+}
+
+// Reset just for me: back to the code defaults, this visit only.
 document.getElementById("resetCfgBtn").onclick = () => {
   Object.assign(CONFIG, DEFAULTS);   // put every number back the way it started
+  applyMusicSettings();
   buildPanel();                      // and update the sliders to match
+};
+
+// Save for everyone: send the ★ settings to the server so every player gets them.
+document.getElementById("saveEveryoneBtn").onclick = async () => {
+  const overrides = {};
+  for (const k of SHARED_KEYS) overrides[k] = CONFIG[k];
+  try {
+    await apiWrite("PUT", "/settings", overrides);
+    showToast("Saved for everyone!");
+  } catch (e) { if (e.message !== "cancelled") showToast(e.message); }
+};
+
+// Reset for everyone: clear the server's shared settings and go back to defaults.
+document.getElementById("resetEveryoneBtn").onclick = async () => {
+  try {
+    await apiWrite("PUT", "/settings", {});
+    Object.assign(CONFIG, DEFAULTS);
+    applyMusicSettings();
+    buildPanel();
+    showToast("Reset for everyone!");
+  } catch (e) { if (e.message !== "cancelled") showToast(e.message); }
 };
 
 /* ================================================================
