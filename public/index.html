@@ -26,6 +26,7 @@
   .btn.pink  { background: linear-gradient(#ff5ec6, #d6147f); }
   .btn.small { font-size: 16px; padding: 8px 16px; border-width: 3px; border-radius: 10px; box-shadow: 0 4px 0 rgba(0,0,0,.35); }
   .levelList { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; max-width: 90vw; }
+  .levelItem { display: flex; gap: 6px; align-items: stretch; }
   #hud { position: absolute; top: 10px; left: 0; right: 0; display: flex;
     justify-content: center; pointer-events: none; }
   #hud .bar { width: min(60vw, 400px); height: 14px; background: rgba(0,0,0,.4);
@@ -51,6 +52,15 @@
   #exportText, #importText { flex: 1; width: 100%; background: #05051a; color: #7dff5e; border: none;
     font-family: monospace; font-size: 14px; padding: 10px; white-space: pre; resize: none;
     -webkit-user-select: text; user-select: text; }
+  /* Small centered pop-ups: the "Save to server" box and the family-PIN box. */
+  #saveBox, #pinBox { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    width: min(90vw, 380px); background: #10102a; border: 4px solid #3ec6ff; border-radius: 16px;
+    padding: 20px; display: flex; flex-direction: column; gap: 12px; z-index: 30; }
+  #saveBox label, #pinBox label { color: #fff; font-weight: bold; }
+  .modalInput { height: 48px; border-radius: 12px; border: 3px solid #555a8a; background: #1e1e40;
+    color: #fff; font-size: 20px; padding: 0 14px; width: 100%; margin-top: 4px;
+    -webkit-user-select: text; user-select: text; }
+  #saveBox .warn { color: #ffe14d; font-size: 13px; }
   /* name box: the kid types their level's title here */
   #levelNameInput { height: 52px; border-radius: 12px; border: 3px solid #555a8a;
     background: #1e1e40; color: #fff; font-size: 20px; font-weight: bold; padding: 0 14px;
@@ -133,6 +143,7 @@
   <div id="editorGridWrap"><canvas id="editorCanvas"></canvas></div>
   <div id="editorBottom">
     <button class="btn green small" id="playTestBtn">&#9654; Play</button>
+    <button class="btn green small" id="saveServerBtn">&#8681; Save to server</button>
     <button class="btn small" id="copyBtn">Copy code</button>
     <button class="btn small" id="importBtn">Import</button>
     <button class="btn small" id="clearBtn">Clear</button>
@@ -155,6 +166,28 @@
   <div style="display:flex;gap:8px;justify-content:center">
     <button class="btn green small" id="loadBtn">Load</button>
     <button class="btn small" id="closeImportBtn">Close</button>
+  </div>
+</div>
+
+<!-- Save-to-server pop-up: asks for the level's name and who made it. -->
+<div id="saveBox" class="hidden">
+  <div style="color:#fff;font-weight:bold;font-size:18px">&#8681; Save this level for everyone</div>
+  <label>Level name<input id="saveNameInput" class="modalInput" maxlength="30"></label>
+  <label>Made by<input id="saveAuthorInput" class="modalInput" maxlength="30" placeholder="Your name" autocomplete="off"></label>
+  <div class="warn">Everyone who plays will see this level.</div>
+  <div style="display:flex;gap:8px;justify-content:center">
+    <button class="btn green small" id="saveConfirmBtn">Save</button>
+    <button class="btn small" id="saveCancelBtn">Cancel</button>
+  </div>
+</div>
+
+<!-- Family-PIN pop-up: shown the first time you save in a session. -->
+<div id="pinBox" class="hidden">
+  <div id="pinMsg" style="color:#fff;font-weight:bold;font-size:18px">Type the family PIN to save:</div>
+  <input id="pinInput" class="modalInput" type="password" inputmode="numeric" autocomplete="off">
+  <div style="display:flex;gap:8px;justify-content:center">
+    <button class="btn green small" id="pinOkBtn">OK</button>
+    <button class="btn small" id="pinCancelBtn">Cancel</button>
   </div>
 </div>
 
@@ -636,7 +669,9 @@ requestAnimationFrame(frame);
 // ---------------- Input ----------------
 let holding = false;
 function pressDown(e) {
-  if (e.target.closest("button") || e.target.closest("#editorScreen") || e.target.closest("#exportBox") || e.target.closest("#importBox")) return;
+  if (e.target.closest("button") || e.target.closest("#editorScreen") || e.target.closest("#exportBox") ||
+      e.target.closest("#importBox") || e.target.closest("#saveBox") || e.target.closest("#pinBox") ||
+      e.target.closest("#controlPanel")) return;
   holding = true;
   if (S.screen === "game") {
     if (player && player.won) { afterWin(); return; }
@@ -729,6 +764,56 @@ function applySettings(overrides) {
   }
 }
 
+// The family PIN, remembered ONLY for this visit (never saved to the device,
+// on purpose — see CLAUDE.md). We ask for it the first time you save.
+let familyPin = null;
+
+// Show the PIN pop-up and wait for the kid to type it. Resolves to the PIN,
+// or null if they tapped Cancel.
+function askPin(message) {
+  return new Promise(resolve => {
+    const box = document.getElementById("pinBox");
+    const input = document.getElementById("pinInput");
+    const okBtn = document.getElementById("pinOkBtn");
+    const cancelBtn = document.getElementById("pinCancelBtn");
+    document.getElementById("pinMsg").textContent = message || "Type the family PIN to save:";
+    input.value = "";
+    box.classList.remove("hidden");
+    setTimeout(() => input.focus(), 50);
+    function done(val) {
+      box.classList.add("hidden");
+      okBtn.onclick = cancelBtn.onclick = input.onkeydown = null;
+      resolve(val);
+    }
+    okBtn.onclick = () => done(input.value.trim() || null);
+    cancelBtn.onclick = () => done(null);
+    input.onkeydown = e => { if (e.key === "Enter") done(input.value.trim() || null); };
+  });
+}
+
+// Send a change to the server with the family PIN attached. If the PIN is
+// wrong the server says 401, so we forget it and ask again once.
+async function apiWrite(method, path, body) {
+  async function send() {
+    const res = await fetch(API_BASE + path, {
+      method,
+      headers: { "Content-Type": "application/json", "X-Family-Pin": familyPin },
+      body: body != null ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    return { res, data };
+  }
+  if (!familyPin) { familyPin = await askPin(); if (!familyPin) throw new Error("cancelled"); }
+  let { res, data } = await send();
+  if (res.status === 401) {
+    familyPin = await askPin("That PIN was wrong. Try again:");
+    if (!familyPin) throw new Error("cancelled");
+    ({ res, data } = await send());
+  }
+  if (!res.ok) throw new Error(data.error || ("Server said " + res.status));
+  return data;
+}
+
 // menu buttons
 const list = document.getElementById("levelList");
 function buildMenu(levels) {
@@ -738,14 +823,36 @@ function buildMenu(levels) {
     return;
   }
   levels.forEach((L, i) => {
-    const b = document.createElement("button");
-    b.className = "btn green";
-    b.textContent = (i + 1) + ". " + L.name + (L.author ? "  — " + L.author : "");
+    const item = document.createElement("div");
+    item.className = "levelItem";
+    // The big green button plays the level...
+    const play = document.createElement("button");
+    play.className = "btn green";
+    play.textContent = (i + 1) + ". " + L.name + (L.author ? "  — " + L.author : "");
     // Each level plays its own tune: the level's `song`, or the next one in the list.
     const songIndex = (L.song !== undefined && L.song !== null) ? L.song : (i % SONGS.length);
-    b.onclick = () => startLevel(parseLevel(L.level), false, document.getElementById("practiceChk").checked, songIndex);
-    list.appendChild(b);
+    play.onclick = () => startLevel(parseLevel(L.level), false, document.getElementById("practiceChk").checked, songIndex);
+    // ...and the little pencil button opens it in the editor to change it.
+    const edit = document.createElement("button");
+    edit.className = "btn small"; edit.textContent = "✎"; edit.title = "Edit";
+    edit.onclick = () => editLevel(L);
+    item.append(play, edit);
+    list.appendChild(item);
   });
+}
+
+// Open one of the server's levels in the editor so it can be changed and
+// saved back in place (instead of making a brand-new copy).
+function editLevel(L) {
+  const parsed = parseLevel(L.level);
+  ED.cols = parsed.cols; ED.rows = parsed.rows;
+  ED.grid = parsed.grid.map(row => row.split(""));
+  ED.editingId = L.id;                              // remember WHICH level we're changing
+  ED.author = L.author || "";
+  ED.song = (L.song != null) ? (Number(L.song) % SONGS.length) : 0;
+  document.getElementById("levelNameInput").value = L.name;
+  updateTuneBtn();
+  S.screen = "editor"; showScreen("editorScreen"); drawEditor();
 }
 
 // Show a friendly note on the menu (used when the server can't be reached).
@@ -753,7 +860,11 @@ function menuMessage(msg) {
   list.innerHTML = '<div style="color:#fff;font-weight:bold;max-width:80vw;text-align:center">' + msg + '</div>';
 }
 
-document.getElementById("openEditorBtn").onclick = () => { S.screen = "editor"; showScreen("editorScreen"); drawEditor(); };
+document.getElementById("openEditorBtn").onclick = () => {
+  // Opening the editor from the menu starts a brand-new level.
+  ED.editingId = null; ED.author = "";
+  S.screen = "editor"; showScreen("editorScreen"); drawEditor();
+};
 
 /* ================================================================
    ========================  CONTROL PANEL  ========================
@@ -847,6 +958,8 @@ const ED = {
   tool: "#",
   cell: 34,                       // on-screen size of one editor cell
   song: 0,                        // which tune (from music.js SONGS) this level plays
+  editingId: null,                // the server level we're changing (null = a brand-new one)
+  author: "",                     // who made this level (asked for on the first save)
 };
 function edInit() {
   ED.grid = Array.from({ length: ED.rows }, () => Array(ED.cols).fill("."));
@@ -1001,6 +1114,54 @@ document.getElementById("importBtn").onclick = () => {
 };
 document.getElementById("loadBtn").onclick = () => importLevel(document.getElementById("importText").value);
 document.getElementById("closeImportBtn").onclick = () => document.getElementById("importBox").classList.add("hidden");
+
+/* ================================================================
+   ====================  SAVE TO THE SERVER  =======================
+   ================================================================
+   "Save to server" sends the level to server.js so everyone can play
+   it. The first time you save a new level we ask for a name and who
+   made it; after that (and when editing an existing level) it just saves. */
+
+// Actually send the current editor level to the server, then refresh the menu.
+async function saveToServer() {
+  const body = { name: levelName(), author: ED.author, level: edToText(), song: ED.song };
+  try {
+    if (ED.editingId != null) {
+      await apiWrite("PUT", "/levels/" + ED.editingId, body);
+    } else {
+      const created = await apiWrite("POST", "/levels", body);
+      ED.editingId = created.id;         // from now on, saving updates this same level
+    }
+    showToast("Saved!");
+    serverLevels = await apiGet("/levels");   // keep our copy fresh for the menu
+    buildMenu(serverLevels);
+  } catch (e) {
+    if (e.message !== "cancelled") showToast(e.message);
+  }
+}
+
+// The Save-pop-up: collects the name + author for a brand-new level.
+function openSaveModal() {
+  document.getElementById("saveNameInput").value = levelName();
+  document.getElementById("saveAuthorInput").value = ED.author || "";
+  document.getElementById("saveBox").classList.remove("hidden");
+  setTimeout(() => document.getElementById("saveAuthorInput").focus(), 50);
+}
+document.getElementById("saveServerBtn").onclick = () => {
+  // Ask for name + author on a brand-new level; otherwise save straight away.
+  if (ED.editingId == null || !ED.author) openSaveModal();
+  else saveToServer();
+};
+document.getElementById("saveConfirmBtn").onclick = () => {
+  const name = document.getElementById("saveNameInput").value.trim() || "My Level";
+  const author = document.getElementById("saveAuthorInput").value.trim();
+  if (!author) { showToast("Please type who made it."); return; }
+  document.getElementById("levelNameInput").value = name;
+  ED.author = author;
+  document.getElementById("saveBox").classList.add("hidden");
+  saveToServer();
+};
+document.getElementById("saveCancelBtn").onclick = () => document.getElementById("saveBox").classList.add("hidden");
 
 /* ================================================================
    ========================  START UP  =============================
