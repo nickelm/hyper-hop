@@ -231,11 +231,16 @@ const DEFAULTS = { ...CONFIG };
    The floor is automatic — you do not need to draw it.
    The bottom row of letters sits right on the floor.
    Rows must all be the same length. Add more rows for taller levels.
+
+   You can also pick which tune plays! Add  song: 0  (or 1, 2, 3...) to a
+   level to choose from the SONGS list in music.js. Leave it out and each
+   level just uses the next song in the list.
    ================================================================ */
 
 const LEVELS = [
 {
   name: "First Steps",
+  song: 0,                 // "Hyper Hop"
   level: `
 ............................................................
 ............................................................
@@ -246,6 +251,7 @@ const LEVELS = [
 },
 {
   name: "Spike Alley",
+  song: 1,                 // "Sky Runner"
   level: `
 ................................................................
 .............*.....................*............................
@@ -256,6 +262,7 @@ const LEVELS = [
 },
 {
   name: "Bounce House",
+  song: 2,                 // "Bounce Party"
   level: `
 ....................................................................
 .............*..................*...................*...............
@@ -266,6 +273,7 @@ const LEVELS = [
 },
 {
   name: "Getting Better",
+  song: 3,                 // "Boss Rush"
   level: `
 ........................................
 ........................................
@@ -327,14 +335,20 @@ const sfx = {
 };
 
 // ---------------- Game state ----------------
-const S = { screen: "menu", level: null, testMode: false, paused: false, practice: false };
+const S = { screen: "menu", level: null, testMode: false, paused: false, practice: false, songIndex: 0 };
 let player, camX, attempts, particles, trail, coinsGot, totalCoins, shake, winT, deadT;
 let checkpoints = [];   // in practice mode: the flags the player has dropped (newest last)
+let beatPulse = 0;      // 0..1, jumps to 1 on the beat then fades (for the beat pulse)
 
-function startLevel(parsed, isTest, practice) {
+// The music calls this on every step. There are 2 steps per beat, so the
+// even ones (0, 2, 4...) are the beats — that's when we flash the world.
+Music.onStep = (i) => { if (CONFIG.BEAT_PULSE && i % 2 === 0) beatPulse = 1; };
+
+function startLevel(parsed, isTest, practice, songIndex) {
   S.level = parsed; S.testMode = !!isTest; S.screen = "game";
   S.paused = false;
   S.practice = !!practice;
+  S.songIndex = songIndex || 0;   // which tune from music.js this level plays
   checkpoints = [];             // fresh level = no checkpoints yet
   attempts = 0;
   resetRun();
@@ -355,6 +369,10 @@ function resetRun() {
   coinsGot = new Set();
   totalCoins = 0;
   for (const row of S.level.grid) for (const c of row) if (c === "*") totalCoins++;
+  // Restart the tune from the very beginning so obstacles line up with the
+  // beat again on every attempt (just like the real rhythm games).
+  if (CONFIG.MUSIC) Music.start(S.songIndex, CONFIG.MUSIC_VOLUME);
+  else Music.stop();
 }
 
 // ---------------- Practice mode checkpoints ----------------
@@ -501,8 +519,12 @@ function draw(dt) {
   if (shake > 0.5) { shakeX = (Math.random()-0.5) * shake; shakeY = (Math.random()-0.5) * shake; shake *= 0.9; }
   ctx.save(); ctx.translate(shakeX, shakeY);
 
-  // parallax dots
-  ctx.fillStyle = "rgba(255,255,255,.15)";
+  // Fade the beat pulse a little every frame (the music sets it back to 1 on
+  // each beat). We use it below to make the world flash gently in time.
+  beatPulse = Math.max(0, beatPulse - dt * 4);
+
+  // parallax dots — brighter for a moment on the beat
+  ctx.fillStyle = "rgba(255,255,255," + (0.15 + beatPulse * 0.35) + ")";
   for (let i = 0; i < 40; i++) {
     const px = ((i * 353 - camX * 0.3) % (W + 100) + W + 100) % (W + 100) - 50;
     const py = (i * 197) % (floorY - 40);
@@ -511,7 +533,9 @@ function draw(dt) {
 
   // ground
   ctx.fillStyle = CONFIG.GROUND_COLOR; ctx.fillRect(0, floorY, W, H - floorY);
-  ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.fillRect(0, floorY, W, 3);
+  // the bright line on top of the floor thickens and glows a touch on the beat
+  ctx.fillStyle = "rgba(255,255,255," + (0.6 + beatPulse * 0.4) + ")";
+  ctx.fillRect(0, floorY, W, 3 + beatPulse * 3);
   ctx.fillStyle = "rgba(255,255,255,.08)";
   for (let gx = -((camX) % (T*2)); gx < W; gx += T*2) ctx.fillRect(gx, floorY + 6, T, H);
 
@@ -697,6 +721,7 @@ document.getElementById("removeCpBtn").onclick = removeCheckpoint;
 // and by tapping after you win.
 function leaveGame() {
   closePanel();
+  Music.stop();                 // silence the music when we leave the level
   document.getElementById("hud").classList.add("hidden");
   document.getElementById("attempts").classList.add("hidden");
   document.getElementById("topLeftBtns").classList.add("hidden");
@@ -720,7 +745,9 @@ const list = document.getElementById("levelList");
 LEVELS.forEach((L, i) => {
   const b = document.createElement("button");
   b.className = "btn green"; b.textContent = (i + 1) + ". " + L.name;
-  b.onclick = () => startLevel(parseLevel(L.level), false, document.getElementById("practiceChk").checked);
+  // Each level plays its own tune: the level's `song`, or the next one in the list.
+  const songIndex = (L.song !== undefined) ? L.song : (i % SONGS.length);
+  b.onclick = () => startLevel(parseLevel(L.level), false, document.getElementById("practiceChk").checked, songIndex);
   list.appendChild(b);
 });
 document.getElementById("openEditorBtn").onclick = () => { S.screen = "editor"; showScreen("editorScreen"); drawEditor(); };
@@ -744,11 +771,14 @@ const PANEL_SLIDERS = [
   ["PLAYER_SIZE",  "Cube size",    16, 60, 1],
   ["SPIKE_MERCY",  "Spike mercy",  0, 0.5, 0.05],
   ["SCREEN_SHAKE", "Screen shake", 0, 30, 1],
+  ["MUSIC_VOLUME", "Music volume", 0, 1, 0.05],
 ];
 // Each switch: [CONFIG name, label]
 const PANEL_TOGGLES = [
   ["TRAIL", "Glowing trail"],
   ["SOUND", "Sound"],
+  ["MUSIC", "Music"],
+  ["BEAT_PULSE", "Beat pulse"],
 ];
 
 const panelControlsEl = document.getElementById("panelControls");
@@ -767,6 +797,8 @@ function buildPanel() {
     slider.addEventListener("input", () => {
       CONFIG[key] = Number(slider.value);
       valEl.textContent = slider.value;
+      // Music volume is special: change it live while the song plays.
+      if (key === "MUSIC_VOLUME") Music.setVolume(CONFIG.MUSIC_VOLUME);
     });
     panelControlsEl.appendChild(wrap);
   }
@@ -777,7 +809,11 @@ function buildPanel() {
       '<label class="row"><span>' + label + '</span>' +
       '<input type="checkbox"' + (CONFIG[key] ? " checked" : "") + '></label>';
     const box = wrap.querySelector("input");
-    box.addEventListener("change", () => { CONFIG[key] = box.checked; });
+    box.addEventListener("change", () => {
+      CONFIG[key] = box.checked;
+      // Turning Music on/off starts or stops the song right away.
+      if (key === "MUSIC") { if (box.checked) Music.start(S.songIndex, CONFIG.MUSIC_VOLUME); else Music.stop(); }
+    });
     panelControlsEl.appendChild(wrap);
   }
 }
