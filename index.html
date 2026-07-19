@@ -126,6 +126,7 @@
   <div id="editorTop">
     <div id="palette"></div>
     <input id="levelNameInput" placeholder="Level name" value="My Level" maxlength="30">
+    <button class="btn small" id="tuneBtn">&#9834; Tune</button>
     <button class="btn small" id="widerBtn">Wider +</button>
     <button class="btn small" id="narrowBtn">Shorter &minus;</button>
   </div>
@@ -242,45 +243,45 @@ const LEVELS = [
   name: "First Steps",
   song: 0,                 // "Hyper Hop"
   level: `
-............................................................
-............................................................
-......................*.....................................
-............................###...............*............
-.........^.......^....###...###....o......^^...##..........|
+......................................................................
+......................................................................
+................................*.....................................
+.......................................###...............*............
+...................^.......^....###...###....o......^^...##..........|
 `,
 },
 {
   name: "Spike Alley",
   song: 1,                 // "Sky Runner"
   level: `
-................................................................
-.............*.....................*............................
-.........................o................####..................
-............###.......^..........####.....####.....*............
-......^^....###...^^..^....^^^...####..^^..####...###..^^^.....|
+..........................................................................
+.......................*.....................*............................
+...................................o................####..................
+......................###.......^..........####.....####.....*............
+................^^....###...^^..^....^^^...####..^^..####...###..^^^.....|
 `,
 },
 {
   name: "Bounce House",
   song: 2,                 // "Bounce Party"
   level: `
-....................................................................
-.............*..................*...................*...............
-............####..............####................####..............
-............####....*.........####................####..............
-....o.......####....o..........####......o........####......o......|
+..............................................................................
+.......................*..................*...................*...............
+......................####..............####................####..............
+......................####....*.........####................####..............
+..............o.......####....o..........####......o........####......o......|
 `,
 },
 {
   name: "Getting Better",
   song: 3,                 // "Boss Rush"
   level: `
-........................................
-........................................
-........................................
-........................................
-.....^........................#.........
-...###^...^^....#^^#^^#.....^...^....|..
+..................................................
+..................................................
+..................................................
+..................................................
+...............^........................#.........
+.............###^...^^....#^^#^^#.....^...^....|..
 `,
 },
 ];
@@ -843,6 +844,7 @@ const ED = {
   grid: [],
   tool: "#",
   cell: 34,                       // on-screen size of one editor cell
+  song: 0,                        // which tune (from music.js SONGS) this level plays
 };
 function edInit() {
   ED.grid = Array.from({ length: ED.rows }, () => Array(ED.cols).fill("."));
@@ -916,13 +918,24 @@ document.getElementById("narrowBtn").onclick = () => {
   drawEditor();
 };
 document.getElementById("clearBtn").onclick = () => { edInit(); drawEditor(); };
-document.getElementById("editorBackBtn").onclick = () => { S.screen = "menu"; showScreen("menuScreen"); };
+document.getElementById("editorBackBtn").onclick = () => { Music.stop(); S.screen = "menu"; showScreen("menuScreen"); };
+
+// The Tune button shows the current song's name. Tap it to switch to the next
+// tune, and it plays a little preview so you can hear which one you picked.
+const tuneBtn = document.getElementById("tuneBtn");
+function updateTuneBtn() { tuneBtn.textContent = "♪ " + SONGS[ED.song].name; }
+tuneBtn.onclick = () => {
+  ED.song = (ED.song + 1) % SONGS.length;
+  updateTuneBtn();
+  if (CONFIG.MUSIC) Music.start(ED.song, CONFIG.MUSIC_VOLUME);   // hear the new tune
+};
+updateTuneBtn();
 
 function edToText() {
   return ED.grid.map(row => row.join("")).join("\n");
 }
 document.getElementById("playTestBtn").onclick = () => {
-  startLevel(parseLevel(edToText()), true);
+  startLevel(parseLevel(edToText()), true, false, ED.song);
 };
 // Make the level's name safe to drop inside "..." in the exported code,
 // so a name with a quote in it can't break things.
@@ -935,7 +948,8 @@ function levelName() {
 }
 document.getElementById("copyBtn").onclick = () => {
   document.getElementById("exportText").value =
-    "{\n  name: \"" + escapeName(levelName()) + "\",\n  level: `\n" + edToText() + "\n`,\n},";
+    "{\n  name: \"" + escapeName(levelName()) + "\",\n  song: " + ED.song +
+    ",\n  level: `\n" + edToText() + "\n`,\n},";
   document.getElementById("exportBox").classList.remove("hidden");
 };
 document.getElementById("closeExportBtn").onclick = () => document.getElementById("exportBox").classList.add("hidden");
@@ -959,6 +973,8 @@ function showToast(msg) {
 function importLevel(text) {
   // If there is a name in the pasted code, grab it. Otherwise keep the current name.
   const nameMatch = text.match(/name:\s*"((?:[^"\\]|\\.)*)"/);
+  // If there is a song number in the pasted code, grab it too.
+  const songMatch = text.match(/song:\s*(\d+)/);
   // If there is a `...` grid block, use only what's inside the backticks.
   const first = text.indexOf("`"), last = text.lastIndexOf("`");
   const gridText = (first !== -1 && last > first) ? text.slice(first + 1, last) : text;
@@ -973,6 +989,7 @@ function importLevel(text) {
     document.getElementById("levelNameInput").value =
       nameMatch[1].replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
   }
+  if (songMatch) { ED.song = Number(songMatch[1]) % SONGS.length; updateTuneBtn(); }
   document.getElementById("importBox").classList.add("hidden");
   drawEditor();
 }
