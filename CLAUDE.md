@@ -44,11 +44,21 @@ break existing level strings.
 ```
 .  empty air
 #  solid block (stand on top; hitting the side = death)
+/  up-ramp   (slope from bottom-left to top-right; ground, never deadly)
+\  down-ramp (slope from top-left to bottom-right; ground, never deadly)
 ^  spike (death; forgiving inner hitbox, see CONFIG.SPIKE_MERCY)
 o  bounce pad (launches upward at CONFIG.PAD_POWER)
 *  coin (collectible)
 |  finish line
 ```
+
+Ramps (`/` `\`) are sloped ground. They only ever push the cube up — no side or
+bottom death, ever. Running off the top of a `/` gives a small pop
+(CONFIG.RAMP_LAUNCH); descending a `\` "glues" the cube to the slope so it doesn't
+micro-hop (CONFIG.RAMP_GLUE). A jump always overrides the glue. A `/` at the foot of
+a block stack lets the cube run up onto the stack instead of dying on its side. In
+stored JSON and in `server.js` template-literal levels, a down-ramp `\` must be
+written as `\\` so a literal backslash survives encoding.
 
 The floor is implicit: the bottom row of the grid sits on an automatic ground
 plane. Rows are top-to-bottom; all rows in a level must be the same length.
@@ -64,7 +74,8 @@ Files:
   Control Panel. On load it fetches settings + levels from the server.
 - `public/music.js` — the chiptune synth (`Music`) and the `SONGS` list.
 - `data/` — runtime state, created/seeded on first run and **gitignored**:
-  - `levels.json` — array of `{id, name, author, level, song, updatedAt}`.
+  - `levels.json` — array of `{id, name, author, level, song, theme, updatedAt}`.
+    Array order is the play order (changed via the reorder endpoint below).
   - `settings.json` — CONFIG overrides saved "for everyone" (a flat subset).
   - `backups/` — timestamped copies of the above, newest 200 kept per file.
 - `deploy/` — `hyper-hop.service` (systemd), `Caddyfile` (HTTPS reverse proxy),
@@ -78,6 +89,12 @@ negative y. `parseLevel()` turns an ASCII string into `{grid, cols, rows}`.
 The client works out its API base from the page URL (`API_BASE`), so it runs the
 same at the site root, in a subfolder, or on a custom port.
 
+Each level carries a `theme` (an index into the client's `THEMES` list in
+`public/index.html`) that sets its background sky + ground colors. Theme `0`
+("Default") means "use the Control Panel colors", so old levels look unchanged and
+the shared `SKY_TOP`/`SKY_BOTTOM`/`GROUND_COLOR` still apply to them. The menu has a
+**Play All** button that runs every level in order (adventure mode).
+
 ## The API
 
 All reads are open. All **mutations require the header `X-Family-Pin`** matching the
@@ -88,13 +105,14 @@ server's `FAMILY_PIN` env var, and are refused with a friendly 403 when
 | ------ | ------------------- | ------------------------------------- |
 | GET    | `/api/levels`       | all levels                            |
 | POST   | `/api/levels`       | create a level (server assigns `id`)  |
+| PUT    | `/api/levels/order` | reorder all levels (send `{order:[ids]}`) |
 | PUT    | `/api/levels/:id`   | update a level                        |
 | DELETE | `/api/levels/:id`   | delete a level                        |
 | GET    | `/api/settings`     | current CONFIG overrides              |
 | PUT    | `/api/settings`     | replace CONFIG overrides              |
 
 Server-side level validation (returns clear messages): only the characters
-`. # ^ o * |`, all rows equal length, at most one `|`, ≤ 500 columns, ≤ 30 rows.
+`. # / \ ^ o * |`, all rows equal length, at most one `|`, ≤ 500 columns, ≤ 30 rows.
 
 Env vars: `PORT` (default 3000), `FAMILY_PIN` (default `1234` for local dev, with a
 warning — always set a real one in production), `READ_ONLY` (`true` freezes writes).
@@ -117,5 +135,9 @@ warning — always set a real one in production), `READ_ONLY` (`true` freezes wr
 - All shipped levels are completable (play or reason through them).
 - Jump, pad bounce, spike death, coin pickup, and finish all work by tap alone.
 - Save to server, Edit, and Save for everyone work by touch; a wrong PIN re-prompts.
+- Picking a level theme (🎨 in the editor) changes its background; it survives a save
+  and reopen; a "Default"-theme level still follows the Control Panel colors.
+- Reorder (▲/▼), delete (🗑 with the "are you sure?" pop-up), and **Play All**
+  (adventure mode) all work by touch; reorder/delete persist after a reload.
 - `READ_ONLY=true` refuses writes with the friendly message; reads still work.
 - The CONFIG block still sits at the top of `public/index.html`, comments intact.

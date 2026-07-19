@@ -47,7 +47,7 @@ const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
 const KEEP_BACKUPS = 200;            // how many old copies of each file to keep
 
 // ---------- Rules for a valid level ----------
-const LEVEL_CHARS = new Set([".", "#", "^", "o", "*", "|"]);
+const LEVEL_CHARS = new Set([".", "#", "^", "o", "*", "|", "/", "\\"]);
 const MAX_COLS = 500;
 const MAX_ROWS = 30;
 
@@ -94,6 +94,17 @@ const SEED = [
 ..................................................
 ...............^........................#.........
 .............###^...^^....#^^#^^#.....^...^....|..` },
+  // A ramp showcase: run UP a  /  onto a block platform, glide DOWN a  \\ ,
+  // then crest a lone  /  for a little launch pop before the finish.
+  // (Down-ramps are written  \\  here because this is a `template literal`,
+  // where a single backslash would be swallowed as an escape.)
+  { name: "Ramp Ramble", author: "Built-in", song: 2, level:
+`........................................................
+........................................................
+........................................................
+........................................................
+............*...............*...........................
+........../####\\............/..............|............` },
 ];
 
 /* ================================================================
@@ -191,7 +202,7 @@ function validateLevel(body) {
   for (const row of rows) {
     if (row.length !== width) throw new Error("All rows must be the same length.");
     for (const ch of row) {
-      if (!LEVEL_CHARS.has(ch)) throw new Error("That character is not allowed: \"" + ch + "\". Use only . # ^ o * |");
+      if (!LEVEL_CHARS.has(ch)) throw new Error("That character is not allowed: \"" + ch + "\". Use only . # ^ o * | / \\");
       if (ch === "|") finishCount++;
     }
   }
@@ -200,11 +211,13 @@ function validateLevel(body) {
   // Keep name/author tidy and a sensible length.
   const author = (body.author && typeof body.author === "string") ? body.author.trim() : "";
   const song = Number.isFinite(body.song) ? Math.max(0, Math.floor(body.song)) : 0;
+  const theme = Number.isFinite(body.theme) ? Math.max(0, Math.floor(body.theme)) : 0;
   return {
     name: name.slice(0, 40),
     author: (author || "Anonymous").slice(0, 40),
     level,
     song,
+    theme,
   };
 }
 
@@ -273,6 +286,29 @@ app.post("/api/levels", guard, (req, res) => {
   levels.push(level);
   writeJsonWithBackup(LEVELS_FILE, levels);
   res.status(201).json(level);
+});
+
+// Change the order of the levels. The tablet sends the full list of level ids
+// in the new order; we rewrite levels.json to match. (This route must come
+// before "/api/levels/:id" below, or ":id" would grab the word "order".)
+app.put("/api/levels/order", guard, (req, res) => {
+  const order = req.body && req.body.order;
+  const levels = readJson(LEVELS_FILE);
+  // The new order must list exactly the ids we already have, each one once.
+  if (!Array.isArray(order) || order.length !== levels.length) {
+    return res.status(400).json({ error: "That new order doesn't match the levels." });
+  }
+  const byId = new Map(levels.map(L => [Number(L.id), L]));
+  const reordered = [];
+  for (const id of order) {
+    const L = byId.get(Number(id));
+    if (!L || reordered.includes(L)) {
+      return res.status(400).json({ error: "That new order doesn't match the levels." });
+    }
+    reordered.push(L);
+  }
+  writeJsonWithBackup(LEVELS_FILE, reordered);
+  res.json(reordered);
 });
 
 app.put("/api/levels/:id", guard, (req, res) => {
