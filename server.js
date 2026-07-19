@@ -49,7 +49,7 @@ const PROFILES_FILE = path.join(DATA_DIR, "profiles.json"); // players + their c
 const KEEP_BACKUPS = 200;            // how many old copies of each file to keep
 
 // ---------- Rules for a valid level ----------
-const LEVEL_CHARS = new Set([".", "#", "^", "o", "*", "|", "/", "\\"]);
+const LEVEL_CHARS = new Set([".", "#", "^", "o", "*", "|", "/", "\\", "=", "-"]);
 const MAX_COLS = 500;
 const MAX_ROWS = 30;
 
@@ -235,7 +235,7 @@ function validateLevel(body) {
   for (const row of rows) {
     if (row.length !== width) throw new Error("All rows must be the same length.");
     for (const ch of row) {
-      if (!LEVEL_CHARS.has(ch)) throw new Error("That character is not allowed: \"" + ch + "\". Use only . # ^ o * | / \\");
+      if (!LEVEL_CHARS.has(ch)) throw new Error("That character is not allowed: \"" + ch + "\". Use only . # ^ o * | / \\ = -");
       if (ch === "|") finishCount++;
     }
   }

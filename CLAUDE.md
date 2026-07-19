@@ -54,7 +54,15 @@ break existing level strings.
 o  bounce pad (launches upward at CONFIG.PAD_POWER)
 *  coin (collectible)
 |  finish line
+=  jump-through platform (thin slab; land on top, pass through from below/sides; never deadly)
+-  disappearing bridge (same physics as `=`; fades away once passed, CONFIG.BRIDGE_FADE_TIME; cosmetic)
 ```
+
+Jump-through platforms (`=` `-`) are one-way: the cube lands on the top when
+falling, but passes straight through them from below and from the sides, and they
+never kill. The `-` bridge is a `=` that fades out after the cube runs past it
+(purely a look — a faded bridge still holds you up); bridges reset to solid on death
+or respawn.
 
 Ramps (`/` `\`) are sloped ground. They only ever push the cube up — no side or
 bottom death, ever. Running off the top of a `/` gives a small pop

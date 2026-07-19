@@ -42,11 +42,12 @@
   #editorScreen { justify-content: flex-start; background: #14142e; gap: 0; }
   #editorTop { display: flex; gap: 8px; align-items: center; padding: 10px;
     width: 100%; justify-content: center; flex-wrap: wrap; }
-  #palette { display: flex; gap: 8px; }
+  #palette { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
   .tileBtn { width: 52px; height: 52px; border-radius: 12px; border: 3px solid #555a8a;
     background: #1e1e40; font-size: 26px; display: flex; align-items: center;
     justify-content: center; cursor: pointer; }
   .tileBtn.selected { border-color: #7dff5e; background: #2a4a2a; }
+  .tileSep { width: 14px; }   /* a little gap between groups of tiles in the palette */
 
   /* "Who's playing?" — the row of player cubes on the menu */
   #profileRow { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
@@ -319,6 +320,9 @@ const CONFIG = {
   RAMP_LAUNCH: 0.6,       // running off the top of a  /  ramp pops you up. Bigger = higher pop. 0 = no pop
   RAMP_GLUE: 12,          // how hard a  \  ramp "sticks" you to the slope so you don't bounce (pixels). 0 = no stick
 
+  // ---------- PLATFORMS & BRIDGES ----------
+  BRIDGE_FADE_TIME: 0.8,  // once you run past a  -  bridge tile, how long it takes to fade away (seconds)
+
   // ---------- SIZES ----------
   TILE: 40,               // size of one grid square. Everything is built from these
   PLAYER_SIZE: 34,        // how big the cube is (should be a bit smaller than TILE)
@@ -478,6 +482,8 @@ function normalizeSkin(raw) {
        o  = bounce pad (launches you high)
        *  = coin (collect it!)
        |  = finish line (you win!)
+       =  = jump-through platform (land on top; jump up through it from below; never deadly)
+       -  = disappearing bridge (works like = , but fades away once you run past it)
 
    The floor is automatic — you do not need to draw it.
    The bottom row of letters sits right on the floor.
@@ -553,6 +559,7 @@ let beatPulse = 0;      // 0..1, jumps to 1 on the beat then fades (for the beat
 // ---------------- Players & skins ----------------
 let profiles = [];        // every saved player, from the server: {id, name, skin}
 let currentProfile = null;// who is playing right now; null means "nobody picked" (default cube)
+let bridgeFades = {};   // "col,row" -> how visible a  -  bridge still is (1 = solid, 0 = gone). Cosmetic only.
 
 // The music calls this on every step. There are 2 steps per beat, so the
 // even ones (0, 2, 4...) are the beats — that's when we flash the world.
@@ -584,6 +591,7 @@ function resetRun() {
   particles = []; trail = []; shake = 0; winT = 0; deadT = 0;
   runPercent = 0; runWasBest = false;
   coinsGot = new Set();
+  bridgeFades = {};                    // every  -  bridge is solid again at the start of a run
   totalCoins = 0;
   for (const row of S.level.grid) for (const c of row) if (c === "*") totalCoins++;
   // Restart the tune from the very beginning so obstacles line up with the
@@ -616,6 +624,7 @@ function restoreCheckpoint() {
              onGround: cp.onGround, dead: false, won: false };
   camX = cp.camX;
   coinsGot = new Set(cp.coins);
+  bridgeFades = {};                    // bridges come back solid on a respawn
   particles = []; trail = []; shake = 0; winT = 0; deadT = 0;
   runPercent = 0; runWasBest = false;
 }
@@ -719,6 +728,21 @@ function physicsStep(dt) {
         if (!coinsGot.has(key) && overlapX && overlapY) { coinsGot.add(key); sfx.coin(); }
       } else if (ch === "|") {
         if (player.x + half > tx) win();
+      } else if (ch === "=" || ch === "-") {
+        // Jump-through platform: you can only LAND on its top when falling.
+        // You pass right through it from below and from the sides, and it never kills.
+        if (overlapX) {
+          const prevBottom = player.y + half - player.vy * dt;
+          if (player.vy >= 0 && prevBottom <= ty + 6) {
+            player.y = ty - half; player.vy = 0; player.onGround = true;
+            player.rot = Math.round(player.rot / 90) * 90;
+          }
+        }
+        // A  -  bridge is a platform that fades away once you've run past it.
+        // Just a look — a faded bridge still holds you up exactly the same.
+        if (ch === "-" && player.x > tx + T * 0.5 && bridgeFades[col + "," + row] === undefined) {
+          bridgeFades[col + "," + row] = 1;   // 1 = fully visible; draw() counts it down to 0
+        }
       }
     }
   }
@@ -1060,6 +1084,31 @@ function draw(dt) {
           ctx.fillStyle = f % 2 ? "#fff" : "#111";
           ctx.fillRect(x + T/2 + 3, y - T + f * 10, 26, 10);
         }
+      } else if (ch === "=" || ch === "-") {
+        // A thin slab across the top third of the tile (that's the part you land on).
+        const th = T / 3;
+        let alpha = 1;
+        if (ch === "-") {                    // a bridge slowly fades once you've run past it
+          const key = col + "," + row;
+          if (bridgeFades[key] !== undefined) {
+            bridgeFades[key] = Math.max(0, bridgeFades[key] - dt / CONFIG.BRIDGE_FADE_TIME);
+            alpha = bridgeFades[key];
+          }
+          if (alpha <= 0) continue;          // fully faded: draw nothing (it stays gone)
+        }
+        ctx.globalAlpha = alpha;
+        if (ch === "=") {                    // solid slab with a white top edge
+          ctx.fillStyle = CONFIG.BLOCK_COLOR; ctx.fillRect(x, y, T, th);
+          ctx.fillStyle = CONFIG.BLOCK_EDGE;  ctx.fillRect(x, y, T, 3);
+        } else {                             // three planks with gaps, so it reads as a bridge
+          const plank = (T - 8) / 3;
+          for (let p = 0; p < 3; p++) {
+            const px = x + 2 + p * (plank + 2);
+            ctx.fillStyle = CONFIG.BLOCK_COLOR; ctx.fillRect(px, y, plank, th);
+            ctx.fillStyle = CONFIG.BLOCK_EDGE;  ctx.fillRect(px, y, plank, 3);
+          }
+        }
+        ctx.globalAlpha = 1;
       }
     }
   }
@@ -2042,6 +2091,8 @@ function edInit() {
 }
 edInit();
 
+// The editor palette. Tiles are shown in groups; a { sep: true } entry leaves a
+// little gap so the new tiles read as their own family (platforms, boosts, etc.).
 const TOOLS = [
   { ch: ".", icon: "\u232B", label: "erase" },
   { ch: "#", icon: "\u2B1B", label: "block" },
@@ -2051,9 +2102,18 @@ const TOOLS = [
   { ch: "o", icon: "\u2B24", label: "pad" },
   { ch: "*", icon: "\u2605", label: "coin" },
   { ch: "|", icon: "\uD83C\uDFC1", label: "finish" },
+  { sep: true },                                      // ---- platforms ----
+  { ch: "=", icon: "\u2550", label: "platform" },    // \u2550 double line = jump-through platform
+  { ch: "-", icon: "\u2509", label: "bridge" },      // \u2509 dashed line = disappearing bridge
 ];
 const paletteEl = document.getElementById("palette");
 TOOLS.forEach(t => {
+  if (t.sep) {                                        // a spacer between groups of tiles
+    const s = document.createElement("div");
+    s.className = "tileSep";
+    paletteEl.appendChild(s);
+    return;
+  }
   const b = document.createElement("div");
   b.className = "tileBtn" + (t.ch === ED.tool ? " selected" : "");
   b.textContent = t.icon; b.title = t.label;
@@ -2090,6 +2150,12 @@ function drawEditor() {
     else if (ch === "o") { eCtx.fillStyle = CONFIG.PAD_COLOR; eCtx.fillRect(x+4, y+c-10, c-8, 6); }
     else if (ch === "*") { eCtx.fillStyle = CONFIG.COIN_COLOR; eCtx.beginPath(); eCtx.arc(x+c/2, y+c/2, c/3, 0, 7); eCtx.fill(); }
     else if (ch === "|") { eCtx.fillStyle = "#fff"; eCtx.fillRect(x+c/2-2, y+2, 4, c-4); }
+    else if (ch === "=") { eCtx.fillStyle = CONFIG.BLOCK_COLOR; eCtx.fillRect(x+2, y+2, c-4, c/3); }
+    else if (ch === "-") {   // three little planks with gaps = a bridge
+      eCtx.fillStyle = CONFIG.BLOCK_COLOR;
+      const plank = (c - 8) / 3;
+      for (let p = 0; p < 3; p++) eCtx.fillRect(x + 2 + p * (plank + 2), y + 2, plank, c/3);
+    }
   }
   // floor hint
   eCtx.fillStyle = "rgba(255,255,255,.5)";
