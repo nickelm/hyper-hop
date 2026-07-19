@@ -80,6 +80,30 @@ const SONGS = [
     HAT:   `x x x x x x x x`,
   },
 
+  {
+    name: "Magical Sound Shower",   // Outrun cruising theme — bright & breezy (C major)
+    BPM: 135,                       // 4 tiles per beat — that classic Hyper Hop feel
+    LEAD: `G4 .  C5 .  E5 D5 C5 .  | D5 .  E5 .  C5 .  .  . |
+           A4 .  D5 .  F5 E5 D5 .  | E5 .  C5 .  G4 .  .  . `,
+    BASS: `C2 C2 C3 C2 G2 G2 C3 C2 | A1 A1 A2 A1 E2 E2 A2 A1 |
+           D2 D2 D3 D2 F2 F2 D3 D2 | G2 G2 G3 G2 D2 D2 G2 G2`,
+    KICK:  `x . . x . . x .`,
+    SNARE: `. . x . . . x .`,
+    HAT:   `x x x x x x x x`,
+  },
+
+  {
+    name: "Axel F",                 // Beverly Hills Cop — that sneaky bouncy hook (F minor)
+    BPM: 108,                       // 5 tiles per beat — relaxed and cool
+    LEAD: `F4 .  Ab4 . F4 .  Bb4 F4 | Eb4 . F4 .  .  .  .  . |
+           F4 .  C5 .  F4 .  Db5 C5 | Ab4 . F4 .  Eb4 . F4 . `,
+    BASS: `F2 F2 F3 F2 F2 F2 F3 F2 | F2 F2 F3 F2 F2 F2 F3 F2 |
+           Ab1 Ab1 Ab2 Ab1 Ab1 Ab1 Ab2 Ab1 | Db2 Db2 Db3 Db2 C2 C2 C3 C2`,
+    KICK:  `x . . . x . . .`,
+    SNARE: `. . x . . . x .`,
+    HAT:   `x . x x x . x x`,
+  },
+
 ];
 
 /* ================================================================

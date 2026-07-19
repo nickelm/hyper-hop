@@ -47,6 +47,37 @@
     background: #1e1e40; font-size: 26px; display: flex; align-items: center;
     justify-content: center; cursor: pointer; }
   .tileBtn.selected { border-color: #7dff5e; background: #2a4a2a; }
+
+  /* "Who's playing?" — the row of player cubes on the menu */
+  #profileRow { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+    align-items: flex-end; max-width: 680px; margin-bottom: 4px; }
+  .profileBtn { display: flex; flex-direction: column; align-items: center; gap: 4px;
+    background: #1e1e40; border: 3px solid #555a8a; border-radius: 14px;
+    padding: 8px 10px; cursor: pointer; color: #fff; font-family: inherit;
+    font-weight: bold; font-size: 15px; min-width: 78px; }
+  .profileBtn.selected { border-color: #7dff5e; background: #2a4a2a; }
+  .profileBtn canvas { width: 56px; height: 56px; }
+  .profileBtn.add { justify-content: center; font-size: 15px; color: #9fb0ff; }
+  .profileBtn .pName { max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* The cube editor: rows of choices under a live preview */
+  #skinScreen { gap: 10px; padding: 12px; overflow: auto; justify-content: flex-start; }
+  #skinTop { display: flex; gap: 8px; align-items: center; width: 100%;
+    max-width: 680px; justify-content: space-between; }
+  #skinPreviewWrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  #skinPreview { background: #14142c; border-radius: 12px; touch-action: none;
+    border: 3px solid #3ec6ff; }
+  .skinControls { width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: 6px; }
+  .skinRow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .skinRow > .lbl { color: #fff; font-weight: bold; font-size: 15px; width: 74px; }
+  .swatch { width: 34px; height: 34px; border-radius: 10px; border: 3px solid #555a8a;
+    cursor: pointer; padding: 0; }
+  .swatch.selected { border-color: #fff; box-shadow: 0 0 0 2px #7dff5e; }
+  .hueSlider { flex: 1; min-width: 120px; height: 30px; accent-color: #ff5ec6; }
+  .optBtn { font-family: inherit; font-weight: bold; font-size: 15px; color: #fff;
+    background: #1e1e40; border: 3px solid #555a8a; border-radius: 10px;
+    padding: 6px 12px; cursor: pointer; }
+  .optBtn.selected { border-color: #7dff5e; background: #2a4a2a; }
   #editorGridWrap { flex: 1; width: 100%; overflow: auto; touch-action: pan-x pan-y;
     padding: 10px; }
   #editorCanvas { background: #1a1a38; border-radius: 8px; touch-action: none; }
@@ -57,10 +88,17 @@
     font-family: monospace; font-size: 14px; padding: 10px; white-space: pre; resize: none;
     -webkit-user-select: text; user-select: text; }
   /* Small centered pop-ups: the "Save to server" box and the family-PIN box. */
-  #saveBox, #pinBox, #confirmBox { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  #saveBox, #pinBox, #confirmBox, #nameBox, #scoresBox { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
     width: min(90vw, 380px); background: #10102a; border: 4px solid #3ec6ff; border-radius: 16px;
     padding: 20px; display: flex; flex-direction: column; gap: 12px; z-index: 30; }
   #saveBox label, #pinBox label { color: #fff; font-weight: bold; }
+  /* The grey score line under each level's Play button. */
+  .levelScore { font-size: 13px; font-weight: normal; color: rgba(255,255,255,.7); margin-top: 3px; }
+  /* The 📊 high-scores list. */
+  #scoresList { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow-y: auto; }
+  .scoreRow { display: flex; justify-content: space-between; color: #fff; font-weight: bold;
+    background: #1e1e40; border-radius: 10px; padding: 8px 14px; font-size: 18px; }
+  .scoreRow.me { background: #2a4a2a; color: #7dff5e; }   /* your own row stands out */
   .modalInput { height: 48px; border-radius: 12px; border: 3px solid #555a8a; background: #1e1e40;
     color: #fff; font-size: 20px; padding: 0 14px; width: 100%; margin-top: 4px;
     -webkit-user-select: text; user-select: text; }
@@ -124,6 +162,7 @@
 <div id="menuScreen" class="screen">
   <button class="btn small" id="menuGearBtn" style="position:absolute;top:12px;right:12px">&#9881; Settings</button>
   <h1>HYPER HOP</h1>
+  <div id="profileRow"></div>
   <button class="btn green" id="playAllBtn">&#9654; Play All</button>
   <div class="levelList" id="levelList"></div>
   <label class="practiceRow"><input type="checkbox" id="practiceChk"> Practice mode (checkpoints)</label>
@@ -163,6 +202,22 @@
     <button class="btn small" id="clearBtn">Clear</button>
     <button class="btn pink small" id="editorBackBtn">&#8592; Menu</button>
   </div>
+</div>
+
+<!-- ======================= CUBE (SKIN) EDITOR ======================= -->
+<div id="skinScreen" class="screen hidden">
+  <div id="skinTop">
+    <h2 style="margin:0;font-size:22px" id="skinTitle">My Cube</h2>
+    <div style="display:flex;gap:8px">
+      <button class="btn green small" id="skinSaveBtn">&#8681; Save</button>
+      <button class="btn pink small" id="skinBackBtn">&#8592; Menu</button>
+    </div>
+  </div>
+  <div id="skinPreviewWrap">
+    <canvas id="skinPreview" width="260" height="150"></canvas>
+    <button class="btn small" id="skinDeathBtn">&#128128; Try it out</button>
+  </div>
+  <div class="skinControls" id="skinControls"></div>
 </div>
 
 <div id="exportBox" class="hidden">
@@ -211,6 +266,26 @@
   <div style="display:flex;gap:8px;justify-content:center">
     <button class="btn pink small" id="confirmYesBtn">Yes</button>
     <button class="btn small" id="confirmNoBtn">Cancel</button>
+  </div>
+</div>
+
+<!-- Who's-playing pop-up: this tablet remembers the name for next time. -->
+<div id="nameBox" class="hidden">
+  <div style="color:#fff;font-weight:bold;font-size:18px">&#128100; Who's playing on this tablet?</div>
+  <input id="nameInput" class="modalInput" maxlength="40" placeholder="Your name" autocomplete="off">
+  <div class="warn" style="color:#ffe14d;font-size:13px">We remember this on your tablet for your high scores.</div>
+  <div style="display:flex;gap:8px;justify-content:center">
+    <button class="btn green small" id="nameOkBtn">OK</button>
+    <button class="btn small" id="nameCancelBtn">Cancel</button>
+  </div>
+</div>
+
+<!-- High-scores pop-up: everyone's best on one level, best first. -->
+<div id="scoresBox" class="hidden">
+  <div id="scoresTitle" style="color:#fff;font-weight:bold;font-size:20px;text-align:center">High scores</div>
+  <div id="scoresList"></div>
+  <div style="display:flex;gap:8px;justify-content:center">
+    <button class="btn green small" id="scoresCloseBtn">Close</button>
   </div>
 </div>
 
@@ -272,6 +347,9 @@ const CONFIG = {
   MUSIC_VOLUME: 0.5,      // how loud the music is (0 = off, 1 = loud)
   MUSIC_BPM: 0,           // music speed. 0 = each song keeps its own speed; any other number forces that beat
   BEAT_PULSE: true,       // make the world flash gently on the beat? true or false
+
+  // ---------- HIGH SCORES ----------
+  LEADERBOARD_TOP: 5,     // how many players to show on the leaderboard (win screen + 📊 list)
 };
 
 // A saved copy of the numbers above, so the "Reset to defaults"
@@ -291,6 +369,101 @@ const THEMES = [
   { name: "Candy",   SKY_TOP: "#ff9ff3", SKY_BOTTOM: "#feca57", GROUND: "#b33771" },
   { name: "Forest",  SKY_TOP: "#0b3d2e", SKY_BOTTOM: "#7bed9f", GROUND: "#123524" },
 ];
+
+/* ================================================================
+   ====================  CUBE SKINS  ==============================
+   ================================================================
+   A "skin" is how a player's cube LOOKS — its shape, colors, face,
+   trail, and how it explodes. Skins are LOOKS ONLY: they never change
+   how the game plays. The cube always bumps into things as a
+   CONFIG.PLAYER_SIZE square, no matter what shape you draw (see the
+   note in drawPlayer). Each player picks a skin in the cube editor;
+   it is saved on the server with their name.
+
+   These lists are the only allowed choices for each part. If a saved
+   skin ever has a choice we don't know (say, from a newer game), we
+   quietly use the default instead, so nothing ever breaks.
+   ================================================================ */
+const SHAPES = ["square", "rounded", "circle", "diamond", "hex"];
+const FACES = ["none", "happy", "cool", "angry", "silly", "sleepy", "robot", "emoji"];
+const TRAIL_STYLES = ["off", "fade", "rainbow", "bubbles"];
+const EXPLOSION_STYLES = ["squares", "stars", "confetti", "emoji"];
+
+// The plain green cube the game always had. Any missing part of a skin
+// falls back to one of these, so the default look never changes.
+const DEFAULT_SKIN = {
+  bodyColor: "#7dff5e",    // same green as CONFIG.PLAYER_COLOR starts as
+  outlineColor: "#ffffff", // the white line around the cube
+  faceColor: "#05051a",    // same dark as CONFIG.PLAYER_EYE_COLOR starts as
+  shape: "square",
+  face: "happy",
+  emoji: "😀",             // only used when face (or explosion) is "emoji"
+  trail: "fade",
+  explosion: "squares",
+};
+
+// Curated color swatches for the cube editor — about ten friendly colors
+// each. The current defaults are included so they show up as a swatch too.
+const SKIN_BODY_COLORS = [
+  "#7dff5e", "#ff5ec6", "#ffe14d", "#3ec6ff", "#ff4d4d",
+  "#a66bff", "#ff9f1c", "#00e5b0", "#ffffff", "#20242e",
+];
+const SKIN_OUTLINE_COLORS = [
+  "#ffffff", "#05051a", "#ffe14d", "#ff5ec6", "#3ec6ff",
+  "#7dff5e", "#ff4d4d", "#a66bff", "#00e5b0", "#ff9f1c",
+];
+const SKIN_FACE_COLORS = [
+  "#05051a", "#ffffff", "#ff4d4d", "#3ec6ff", "#ffe14d",
+  "#ff5ec6", "#7dff5e", "#a66bff", "#00e5b0", "#ff9f1c",
+];
+
+// Turn a rainbow-slider hue (0–360) into a "#rrggbb" color. We keep the
+// color bright and punchy (fixed saturation + lightness) so every hue looks
+// good on a cube. Returns 6 hex digits, which is exactly what the server wants.
+function hslToHex(hue) {
+  const s = 0.85, l = 0.55;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = ((hue % 360) + 360) % 360 / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  let r = 0, g = 0, b = 0;
+  if (hp < 1) { r = c; g = x; }
+  else if (hp < 2) { r = x; g = c; }
+  else if (hp < 3) { g = c; b = x; }
+  else if (hp < 4) { g = x; b = c; }
+  else if (hp < 5) { r = x; b = c; }
+  else { r = c; b = x; }
+  const m = l - c / 2;
+  const hex = v => Math.round((v + m) * 255).toString(16).padStart(2, "0");
+  return "#" + hex(r) + hex(g) + hex(b);
+}
+
+// Take whatever skin we were handed (from the server, an old save, or a
+// half-built one in the editor) and return a complete, safe skin. This NEVER
+// throws — every bad or missing part is replaced by the default. Because we
+// call it everywhere a skin is used, a broken skin can never crash the game.
+function normalizeSkin(raw) {
+  const s = (raw && typeof raw === "object") ? raw : {};
+  const isColor = v => typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v);
+  const pick = (v, list, def) => list.includes(v) ? v : def;
+  // Keep only the FIRST emoji someone typed (a whole emoji, even a fancy one).
+  let emoji = DEFAULT_SKIN.emoji;
+  if (typeof s.emoji === "string" && s.emoji.trim()) {
+    const first = (typeof Intl !== "undefined" && Intl.Segmenter)
+      ? [...new Intl.Segmenter().segment(s.emoji.trim())][0].segment
+      : [...s.emoji.trim()][0];
+    if (first) emoji = first;
+  }
+  return {
+    bodyColor:    isColor(s.bodyColor)    ? s.bodyColor    : DEFAULT_SKIN.bodyColor,
+    outlineColor: isColor(s.outlineColor) ? s.outlineColor : DEFAULT_SKIN.outlineColor,
+    faceColor:    isColor(s.faceColor)    ? s.faceColor    : DEFAULT_SKIN.faceColor,
+    shape:     pick(s.shape,     SHAPES,           DEFAULT_SKIN.shape),
+    face:      pick(s.face,      FACES,            DEFAULT_SKIN.face),
+    emoji,
+    trail:     pick(s.trail,     TRAIL_STYLES,     DEFAULT_SKIN.trail),
+    explosion: pick(s.explosion, EXPLOSION_STYLES, DEFAULT_SKIN.explosion),
+  };
+}
 
 /* ================================================================
    ====================  THE LEVELS  ===============================
@@ -370,21 +543,28 @@ const sfx = {
 };
 
 // ---------------- Game state ----------------
-const S = { screen: "menu", level: null, testMode: false, paused: false, practice: false, songIndex: 0, themeIndex: 0, campaign: false, campaignIndex: 0 };
+const S = { screen: "menu", level: null, levelId: null, testMode: false, paused: false, practice: false, songIndex: 0, themeIndex: 0, campaign: false, campaignIndex: 0 };
 let player, camX, attempts, particles, trail, coinsGot, totalCoins, shake, winT, deadT;
+let runPercent = 0;      // how far you got this run (0..100), shown on the death/win screen
+let runWasBest = false;  // did this run beat your old best on this level? (for the "NEW BEST!" flash)
 let checkpoints = [];   // in practice mode: the flags the player has dropped (newest last)
 let beatPulse = 0;      // 0..1, jumps to 1 on the beat then fades (for the beat pulse)
+
+// ---------------- Players & skins ----------------
+let profiles = [];        // every saved player, from the server: {id, name, skin}
+let currentProfile = null;// who is playing right now; null means "nobody picked" (default cube)
 
 // The music calls this on every step. There are 2 steps per beat, so the
 // even ones (0, 2, 4...) are the beats — that's when we flash the world.
 Music.onStep = (i) => { if (CONFIG.BEAT_PULSE && i % 2 === 0) beatPulse = 1; };
 
-function startLevel(parsed, isTest, practice, songIndex, themeIndex) {
+function startLevel(parsed, isTest, practice, songIndex, themeIndex, levelId) {
   S.level = parsed; S.testMode = !!isTest; S.screen = "game";
   S.paused = false;
   S.practice = !!practice;
   S.songIndex = songIndex || 0;   // which tune from music.js this level plays
   S.themeIndex = themeIndex || 0; // which background theme this level uses
+  S.levelId = (levelId != null) ? levelId : null;  // which server level (for high scores); null = a test run, no score
   checkpoints = [];             // fresh level = no checkpoints yet
   attempts = 0;
   resetRun();
@@ -402,6 +582,7 @@ function resetRun() {
   camX = -T * 5;                       // little run-up before the level starts
   player.x = camX + T * 2;
   particles = []; trail = []; shake = 0; winT = 0; deadT = 0;
+  runPercent = 0; runWasBest = false;
   coinsGot = new Set();
   totalCoins = 0;
   for (const row of S.level.grid) for (const c of row) if (c === "*") totalCoins++;
@@ -436,6 +617,7 @@ function restoreCheckpoint() {
   camX = cp.camX;
   coinsGot = new Set(cp.coins);
   particles = []; trail = []; shake = 0; winT = 0; deadT = 0;
+  runPercent = 0; runWasBest = false;
 }
 
 // ---------------- Geometry helpers ----------------
@@ -563,20 +745,228 @@ function jump() {
   if (player.onGround) { player.vy = -CONFIG.JUMP_POWER; player.onGround = false; sfx.jump(); }
 }
 
+// How far through the level the cube is right now, 0 (start) to 1 (finish).
+// The cube only ever moves right, so this is also the furthest it has reached.
+function levelProgress() {
+  if (!S.level || !player) return 0;
+  return Math.max(0, Math.min(1, (player.x / CONFIG.TILE) / S.level.cols));
+}
+
 function die() {
   if (player.dead) return;
   player.dead = true; deadT = 0; shake = CONFIG.SCREEN_SHAKE; sfx.death();
-  for (let i = 0; i < CONFIG.PARTICLES_ON_DEATH; i++) {
-    const a = Math.random() * Math.PI * 2, sp = 150 + Math.random() * 450;
-    particles.push({ x: player.x, y: player.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 200, life: 1 });
-  }
+  runPercent = Math.round(levelProgress() * 100);   // how far you got, for the high score
+  submitScore(runPercent);
+  spawnExplosion(player.x, player.y, activeSkin(), particles);
 }
 function win() {
   if (player.won) return;
   player.won = true; winT = 0; sfx.win();
+  runPercent = 100;                                 // reaching the finish is 100%
+  submitScore(runPercent);
 }
 
 // ---------------- Rendering ----------------
+
+// Which skin should the cube wear right now? If a player is chosen, we use
+// their saved skin. If nobody is chosen, we build the classic cube from the
+// Control Panel colors, so "Save for everyone" color tweaks still work and the
+// default look is exactly the same as it always was.
+function activeSkin() {
+  if (currentProfile && currentProfile.skin) return normalizeSkin(currentProfile.skin);
+  return normalizeSkin({ bodyColor: CONFIG.PLAYER_COLOR, faceColor: CONFIG.PLAYER_EYE_COLOR });
+}
+
+// Draw just the cube's OUTLINE SHAPE at the origin (already moved + rotated),
+// then fill and stroke it. hs is half the cube's size.
+function drawShape(ctx, shape, hs) {
+  ctx.beginPath();
+  if (shape === "circle") {
+    ctx.arc(0, 0, hs, 0, Math.PI * 2);
+  } else if (shape === "diamond") {
+    ctx.moveTo(0, -hs); ctx.lineTo(hs, 0); ctx.lineTo(0, hs); ctx.lineTo(-hs, 0);
+    ctx.closePath();
+  } else if (shape === "hex") {
+    for (let i = 0; i < 6; i++) {
+      const a = Math.PI / 180 * (60 * i - 30);
+      const x = Math.cos(a) * hs, y = Math.sin(a) * hs;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+  } else if (shape === "rounded") {
+    const r = hs * 0.4;
+    if (ctx.roundRect) { ctx.roundRect(-hs, -hs, hs * 2, hs * 2, r); }
+    else {               // older browsers: build the rounded box by hand
+      ctx.moveTo(-hs + r, -hs);
+      ctx.arcTo(hs, -hs, hs, hs, r); ctx.arcTo(hs, hs, -hs, hs, r);
+      ctx.arcTo(-hs, hs, -hs, -hs, r); ctx.arcTo(-hs, -hs, hs, -hs, r);
+      ctx.closePath();
+    }
+  } else {               // "square" — the classic cube
+    ctx.rect(-hs, -hs, hs * 2, hs * 2);
+  }
+  ctx.fill();
+  ctx.stroke();
+}
+
+// Draw the cube's FACE at the origin (already moved + rotated). Faces are
+// simple little shapes; "emoji" writes one emoji big in the middle.
+function drawFace(ctx, skin, hs) {
+  if (skin.face === "none") return;
+  ctx.fillStyle = skin.faceColor;
+  const lE = -hs * 0.45, rE = hs * 0.13, eyeW = hs * 0.32, eyeH = hs * 0.5, eyeY = -hs * 0.4;
+
+  if (skin.face === "emoji") {
+    ctx.font = (hs * 1.6) + "px serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(skin.emoji, 0, hs * 0.08);
+    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";   // put it back for other text
+    return;
+  }
+  if (skin.face === "happy") {          // the classic face: two eyes + a mouth
+    ctx.fillRect(lE, eyeY, eyeW, eyeH);
+    ctx.fillRect(rE, eyeY, eyeW, eyeH);
+    ctx.fillRect(-hs * 0.35, hs * 0.25, hs * 0.7, hs * 0.18);
+    return;
+  }
+  if (skin.face === "cool") {           // sunglasses bar + a little smile
+    ctx.fillRect(-hs * 0.55, -hs * 0.25, hs * 1.1, hs * 0.28);
+    ctx.fillRect(-hs * 0.3, hs * 0.32, hs * 0.6, hs * 0.12);
+    return;
+  }
+  if (skin.face === "angry") {          // slanted brows + eyes + a frown
+    ctx.fillRect(lE, eyeY + hs * 0.12, eyeW, eyeH * 0.7);
+    ctx.fillRect(rE, eyeY + hs * 0.12, eyeW, eyeH * 0.7);
+    ctx.save();
+    ctx.rotate(0.35); ctx.fillRect(-hs * 0.5, -hs * 0.5, hs * 0.4, hs * 0.1); ctx.restore();
+    ctx.save();
+    ctx.rotate(-0.35); ctx.fillRect(hs * 0.1, -hs * 0.5, hs * 0.4, hs * 0.1); ctx.restore();
+    ctx.fillRect(-hs * 0.3, hs * 0.42, hs * 0.6, hs * 0.12);
+    return;
+  }
+  if (skin.face === "silly") {          // eyes + a tongue sticking out
+    ctx.fillRect(lE, eyeY, eyeW, eyeH);
+    ctx.fillRect(rE, eyeY, eyeW, eyeH);
+    ctx.fillRect(-hs * 0.35, hs * 0.2, hs * 0.7, hs * 0.12);
+    ctx.fillStyle = "#ff5ec6";          // a pink tongue, always cheerful
+    ctx.fillRect(-hs * 0.1, hs * 0.28, hs * 0.2, hs * 0.28);
+    return;
+  }
+  if (skin.face === "sleepy") {         // two closed-eye lines + a tiny mouth
+    ctx.fillRect(lE, 0, eyeW, hs * 0.12);
+    ctx.fillRect(rE, 0, eyeW, hs * 0.12);
+    ctx.fillRect(-hs * 0.12, hs * 0.35, hs * 0.24, hs * 0.1);
+    return;
+  }
+  if (skin.face === "robot") {          // rectangular eyes + an antenna on top
+    ctx.fillRect(lE, eyeY, eyeW, eyeH * 0.7);
+    ctx.fillRect(rE, eyeY, eyeW, eyeH * 0.7);
+    ctx.fillRect(-hs * 0.3, hs * 0.3, hs * 0.6, hs * 0.1);
+    ctx.fillRect(-hs * 0.04, -hs * 1.25, hs * 0.08, hs * 0.35);  // antenna wire
+    ctx.beginPath(); ctx.arc(0, -hs * 1.3, hs * 0.12, 0, Math.PI * 2); ctx.fill(); // antenna dot
+    return;
+  }
+}
+
+// Draw the whole cube with a skin. Used by the game, the cube-editor preview,
+// and the little cubes on the player buttons.
+//
+// COLLISION NOTE: the cube's hitbox is ALWAYS a CONFIG.PLAYER_SIZE square, no
+// matter what shape/size we draw here. Skins are LOOKS ONLY — they never change
+// where you can stand, what kills you, or how hard the level is. (physicsStep()
+// only ever uses CONFIG.PLAYER_SIZE for the hitbox — never the drawn shape.)
+function drawPlayer(ctx, x, y, rot, skin, size) {
+  const s = normalizeSkin(skin);
+  const hs = (size || CONFIG.PLAYER_SIZE) / 2;
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(rot * Math.PI / 180);
+  ctx.fillStyle = s.bodyColor;
+  ctx.strokeStyle = s.outlineColor; ctx.lineWidth = 3;
+  drawShape(ctx, s.shape, hs);
+  drawFace(ctx, s, hs);
+  ctx.restore();
+}
+
+// Draw the glowing trail behind the cube, in whatever style the skin picked.
+// It takes the trail array so the editor preview can pass its own. CONFIG.TRAIL
+// is still the master on/off switch, exactly like before.
+function drawTrail(ctx, sx, sy, skin, dt, trailArr, dead) {
+  if (!CONFIG.TRAIL || skin.trail === "off" || dead) return;
+  let i = 0;
+  for (const t of trailArr) {
+    t.life -= dt * 1.6;
+    if (t.life <= 0) { i++; continue; }
+    const x = sx(t.x), y = sy(t.y), k = CONFIG.PLAYER_SIZE * t.life * 0.7;
+    if (skin.trail === "bubbles") {
+      ctx.globalAlpha = t.life * 0.4; ctx.fillStyle = skin.bodyColor;
+      ctx.beginPath(); ctx.arc(x, y, k * 0.5, 0, Math.PI * 2); ctx.fill();
+    } else if (skin.trail === "rainbow") {
+      ctx.globalAlpha = t.life * 0.5;
+      ctx.fillStyle = "hsl(" + ((i * 30) % 360) + ",90%,60%)";
+      ctx.fillRect(x - k / 2, y - k / 2, k, k);
+    } else {              // "fade" — the classic trail, in the cube's own color
+      ctx.globalAlpha = t.life * 0.35; ctx.fillStyle = skin.bodyColor;
+      ctx.fillRect(x - k / 2, y - k / 2, k, k);
+    }
+    i++;
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Make the cube explode into pieces. Each piece remembers the style + color +
+// emoji so the look can't change halfway through. Count stays CONFIG.PARTICLES_ON_DEATH.
+// Takes the particle array so the editor preview can pass its own.
+function spawnExplosion(x, y, skin, partArr) {
+  for (let i = 0; i < CONFIG.PARTICLES_ON_DEATH; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 150 + Math.random() * 450;
+    partArr.push({
+      x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 200, life: 1,
+      rot: Math.random() * Math.PI * 2, vr: (Math.random() - 0.5) * 12,
+      style: skin.explosion, color: skin.bodyColor, emoji: skin.emoji,
+      hue: (i * 47) % 360,
+    });
+  }
+}
+
+// Draw one small star (5 points) at the origin. Used by the "stars" explosion.
+function drawStar(ctx, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const rr = (i % 2 === 0) ? r : r * 0.45;
+    const a = Math.PI / 180 * (36 * i - 90);
+    const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath(); ctx.fill();
+}
+
+// Move and draw the explosion pieces, in whatever style each piece remembers.
+// Takes the particle array so the editor preview can pass its own.
+function renderParticles(ctx, sx, sy, dt, partArr) {
+  for (const p of partArr) {
+    p.life -= dt * 1.2; if (p.life <= 0) continue;
+    p.vy += CONFIG.GRAVITY * 0.4 * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+    if (p.vr) p.rot += p.vr * dt;
+    ctx.globalAlpha = p.life;
+    const x = sx(p.x), y = sy(p.y), style = p.style || "squares";
+    if (style === "emoji") {
+      ctx.font = "16px serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(p.emoji || "😀", x, y);
+      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    } else if (style === "stars") {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(p.rot || 0);
+      ctx.fillStyle = p.color || CONFIG.PLAYER_COLOR; drawStar(ctx, 8); ctx.restore();
+    } else if (style === "confetti") {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(p.rot || 0);
+      ctx.fillStyle = "hsl(" + (p.hue || 0) + ",90%,60%)"; ctx.fillRect(-5, -3, 10, 6); ctx.restore();
+    } else {             // "squares" — the classic 8×8 pieces
+      ctx.fillStyle = p.color || CONFIG.PLAYER_COLOR;
+      ctx.fillRect(x - 4, y - 4, 8, 8);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
 function draw(dt) {
   const T = CONFIG.TILE;
   // The level's theme decides the background colors. Theme 0 ("Default"), and
@@ -685,48 +1075,23 @@ function draw(dt) {
     ctx.closePath(); ctx.fill();
   }
 
-  // trail
-  if (CONFIG.TRAIL && !player.dead) {
-    for (const t of trail) {
-      t.life -= dt * 1.6;
-      if (t.life <= 0) continue;
-      ctx.fillStyle = CONFIG.PLAYER_COLOR;
-      ctx.globalAlpha = t.life * 0.35;
-      const s = CONFIG.PLAYER_SIZE * t.life * 0.7;
-      ctx.fillRect(sx(t.x) - s/2, sy(t.y) - s/2, s, s);
-    }
-    ctx.globalAlpha = 1;
-  }
+  // Work out the cube's skin once for this frame (see activeSkin).
+  const skin = activeSkin();
+
+  // trail — the skin picks the style; CONFIG.TRAIL is still the master switch
+  drawTrail(ctx, sx, sy, skin, dt, trail, player.dead);
 
   // player
   if (!player.dead) {
-    const px = sx(player.x), py = sy(player.y), hs = CONFIG.PLAYER_SIZE / 2;
-    ctx.save();
-    ctx.translate(px, py); ctx.rotate(player.rot * Math.PI / 180);
-    ctx.fillStyle = CONFIG.PLAYER_COLOR;
-    ctx.fillRect(-hs, -hs, hs*2, hs*2);
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.strokeRect(-hs, -hs, hs*2, hs*2);
-    // face
-    ctx.fillStyle = CONFIG.PLAYER_EYE_COLOR;
-    ctx.fillRect(-hs*0.45, -hs*0.4, hs*0.32, hs*0.5);
-    ctx.fillRect(hs*0.13, -hs*0.4, hs*0.32, hs*0.5);
-    ctx.fillRect(-hs*0.35, hs*0.25, hs*0.7, hs*0.18);
-    ctx.restore();
+    drawPlayer(ctx, sx(player.x), sy(player.y), player.rot, skin);
   }
 
-  // particles
-  for (const p of particles) {
-    p.life -= dt * 1.2; if (p.life <= 0) continue;
-    p.vy += CONFIG.GRAVITY * 0.4 * dt; p.x += p.vx * dt; p.y += p.vy * dt;
-    ctx.globalAlpha = p.life;
-    ctx.fillStyle = CONFIG.PLAYER_COLOR;
-    ctx.fillRect(sx(p.x) - 4, sy(p.y) - 4, 8, 8);
-  }
-  ctx.globalAlpha = 1;
+  // particles (the death explosion) — each piece carries its own style/color
+  renderParticles(ctx, sx, sy, dt, particles);
   ctx.restore();
 
   // progress bar + coins
-  const prog = Math.max(0, Math.min(1, (player.x / T) / S.level.cols));
+  const prog = levelProgress();
   document.getElementById("progressFill").style.width = (prog * 100) + "%";
   ctx.fillStyle = "#fff"; ctx.font = "bold 18px Trebuchet MS"; ctx.textAlign = "right";
   ctx.fillText("\u25CF " + coinsGot.size + " / " + totalCoins, W - 16, 30);
@@ -736,16 +1101,39 @@ function draw(dt) {
   if (player.won) {
     winT += dt;
     ctx.fillStyle = "rgba(0,0,0,.5)"; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = "#7dff5e"; ctx.font = "bold 54px Trebuchet MS"; ctx.textAlign = "center";
-    ctx.fillText("LEVEL COMPLETE!", W/2, H/2 - 20);
+    ctx.textAlign = "center";
+    let y = H/2 - 120;
+    ctx.fillStyle = "#7dff5e"; ctx.font = "bold 54px Trebuchet MS";
+    ctx.fillText("LEVEL COMPLETE!", W/2, y); y += 44;
     ctx.fillStyle = "#fff"; ctx.font = "bold 22px Trebuchet MS";
-    ctx.fillText("Coins: " + coinsGot.size + " / " + totalCoins + "   Attempts: " + attempts, W/2, H/2 + 24);
-    ctx.font = "18px Trebuchet MS";
-    if (winT > 0.8) ctx.fillText("Tap to continue", W/2, H/2 + 64);
+    ctx.fillText("Coins: " + coinsGot.size + " / " + totalCoins + "   Attempts: " + attempts, W/2, y); y += 34;
+    if (runWasBest) {                          // you just beat your old record
+      ctx.fillStyle = "#ffe14d"; ctx.font = "bold 26px Trebuchet MS";
+      ctx.fillText("NEW BEST! 🎉", W/2, y);
+    }
+    y += 34;
+    y = drawLeaderboard(W/2, y, S.levelId);    // the top players for this level
+    ctx.fillStyle = "#fff"; ctx.font = "18px Trebuchet MS";
+    if (winT > 0.8) ctx.fillText("Tap to continue", W/2, y + 20);
     ctx.textAlign = "left";
   }
   if (player.dead) {
     deadT += dt;
+    // A quick "how far did you get?" note while the cube is exploding, before
+    // the level starts over. (Only for real levels, not editor test runs.)
+    if (S.levelId != null) {
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#fff"; ctx.font = "bold 30px Trebuchet MS";
+      let line = "You reached " + runPercent + "%";
+      const best = myBest(S.levelId);
+      if (best != null) line += "   ·   Best " + best + "%";
+      ctx.fillText(line, W/2, H/2 - 40);
+      if (runWasBest) {
+        ctx.fillStyle = "#ffe14d"; ctx.font = "bold 24px Trebuchet MS";
+        ctx.fillText("NEW BEST! 🎉", W/2, H/2);
+      }
+      ctx.textAlign = "left";
+    }
     // In practice mode with a flag dropped, come back at the newest flag.
     // Otherwise (or with no flags yet) start the whole level over.
     if (deadT > 0.9) {
@@ -753,6 +1141,23 @@ function draw(dt) {
       else resetRun();
     }
   }
+}
+
+// Draw the top players for a level, centered on cx starting at y. Returns the
+// y just below the last line, so the caller can keep drawing under it.
+function drawLeaderboard(cx, y, levelId) {
+  const board = leaderboardFor(levelId).slice(0, CONFIG.LEADERBOARD_TOP);
+  if (!board.length) return y;
+  ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.font = "bold 16px Trebuchet MS";
+  ctx.fillText("🏆 Best scores", cx, y); y += 26;
+  ctx.font = "bold 20px Trebuchet MS";
+  board.forEach((s, i) => {
+    // Your own line glows so you can spot it in the list.
+    ctx.fillStyle = (s.player === playerName) ? "#7dff5e" : "#fff";
+    ctx.fillText((i + 1) + ". " + s.player + " — " + s.percent + "%", cx, y);
+    y += 26;
+  });
+  return y;
 }
 
 // ---------------- Main loop ----------------
@@ -775,7 +1180,8 @@ requestAnimationFrame(frame);
 // ---------------- Input ----------------
 let holding = false;
 function pressDown(e) {
-  if (e.target.closest("button") || e.target.closest("#editorScreen") || e.target.closest("#exportBox") ||
+  if (e.target.closest("button") || e.target.closest("#editorScreen") || e.target.closest("#skinScreen") ||
+      e.target.closest("#exportBox") ||
       e.target.closest("#importBox") || e.target.closest("#saveBox") || e.target.closest("#pinBox") ||
       e.target.closest("#confirmBox") || e.target.closest("#controlPanel")) return;
   holding = true;
@@ -845,7 +1251,7 @@ function afterWin() {
 function startLevelByIndex(i) {
   const L = serverLevels[i];
   if (!L) { leaveGame(); return; }
-  startLevel(parseLevel(L.level), false, isPracticeOn(), songForLevel(L, i), L.theme || 0);
+  startLevel(parseLevel(L.level), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id);
 }
 
 // "Play All": start at the first level and roll through them all in order.
@@ -858,7 +1264,7 @@ function startCampaign() {
 
 // ---------------- Screens ----------------
 function showScreen(id) {
-  for (const s of ["menuScreen", "editorScreen"]) document.getElementById(s).classList.toggle("hidden", s !== id);
+  for (const s of ["menuScreen", "editorScreen", "skinScreen"]) document.getElementById(s).classList.toggle("hidden", s !== id);
   if (id !== null) {
     document.getElementById("hud").classList.add("hidden");
     document.getElementById("attempts").classList.add("hidden");
@@ -880,6 +1286,10 @@ const API_BASE = new URL(".", document.baseURI).pathname + "api";
 // The levels we downloaded from the server (the editor's Edit buttons use this).
 let serverLevels = [];
 
+// Everyone's high scores (each player's best % on each level). Downloaded at
+// start and kept fresh as new scores come in.
+let serverScores = [];
+
 // Ask the server for something and get back the answer as data.
 async function apiGet(path) {
   const res = await fetch(API_BASE + path);
@@ -896,6 +1306,18 @@ function applySettings(overrides) {
   }
   // The music speed lives inside music.js, so hand it the shared value.
   if (typeof Music !== "undefined") Music.setBpm(CONFIG.MUSIC_BPM);
+}
+
+// Who is playing on THIS tablet. Unlike the family PIN, the player's name is
+// remembered on the device (in localStorage) so each kid's tablet knows them —
+// it fills in "Made by" in the editor and labels their high scores. It's the one
+// small per-device thing we keep (see CLAUDE.md rule 4).
+let playerName = "";
+try { playerName = localStorage.getItem("hh_player") || ""; } catch (e) { playerName = ""; }
+function setPlayerName(name) {
+  playerName = (name || "").trim().slice(0, 40);
+  try { localStorage.setItem("hh_player", playerName); } catch (e) {}
+  updateNameBtn();
 }
 
 // The family PIN, remembered ONLY for this visit (never saved to the device,
@@ -967,6 +1389,46 @@ async function apiWrite(method, path, body) {
   return data;
 }
 
+/* ================================================================
+   ==================  HIGH SCORES (best % per level)  ============
+   ================================================================ */
+
+// All of a level's scores, best first.
+function leaderboardFor(levelId) {
+  return serverScores
+    .filter(s => Number(s.levelId) === Number(levelId))
+    .sort((a, b) => b.percent - a.percent);
+}
+// This tablet's own best % on a level, or null if they've never played it.
+function myBest(levelId) {
+  if (!playerName) return null;
+  const mine = serverScores.find(s => Number(s.levelId) === Number(levelId) && s.player === playerName);
+  return mine ? mine.percent : null;
+}
+// Send how far the player got, but only when it's a real level, we know who is
+// playing, AND it beats their old best (so we don't spam the server on every
+// death). No family PIN needed — playing should never ask for the PIN.
+async function submitScore(percent) {
+  runWasBest = false;
+  if (S.levelId == null || !playerName) return;
+  const old = myBest(S.levelId);
+  if (old != null && percent <= old) return;     // not an improvement — skip
+  runWasBest = true;
+  try {
+    // A plain POST with NO family PIN — saving a score is open on purpose.
+    const res = await fetch(API_BASE + "/scores", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ levelId: S.levelId, player: playerName, percent }),
+    });
+    if (!res.ok) return;
+    const board = await res.json();               // this level's fresh leaderboard
+    // Fold it back into our copy so menus/overlays show the new numbers.
+    serverScores = serverScores.filter(s => Number(s.levelId) !== Number(S.levelId)).concat(board);
+    if (S.screen === "menu") buildMenu(serverLevels);
+  } catch (e) { /* a lost score is no big deal — just keep playing */ }
+}
+
 // menu buttons
 const list = document.getElementById("levelList");
 function buildMenu(levels) {
@@ -978,11 +1440,18 @@ function buildMenu(levels) {
   levels.forEach((L, i) => {
     const item = document.createElement("div");
     item.className = "levelItem";
-    // The big green button plays the level...
+    // The big green button plays the level. Its second line shows the top
+    // score and your own best, so kids can see what to beat.
     const play = document.createElement("button");
     play.className = "btn green";
-    play.textContent = (i + 1) + ". " + L.name + (L.author ? "  — " + L.author : "");
-    play.onclick = () => { S.campaign = false; startLevel(parseLevel(L.level), false, isPracticeOn(), songForLevel(L, i), L.theme || 0); };
+    const title = (i + 1) + ". " + L.name + (L.author ? "  — " + L.author : "");
+    play.innerHTML = '<div>' + escapeHtml(title) + '</div>' +
+      '<div class="levelScore">' + scoreLine(L.id) + '</div>';
+    play.onclick = () => { S.campaign = false; startLevel(parseLevel(L.level), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id); };
+    // ...a little 📊 opens the full leaderboard for this level...
+    const board = document.createElement("button");
+    board.className = "btn small"; board.textContent = "📊"; board.title = "High scores";
+    board.onclick = () => openScores(L);
     // ...the up/down buttons move it earlier or later in the list...
     const up = document.createElement("button");
     up.className = "btn small"; up.textContent = "▲"; up.title = "Move up";
@@ -1000,10 +1469,354 @@ function buildMenu(levels) {
     const del = document.createElement("button");
     del.className = "btn small pink"; del.textContent = "🗑"; del.title = "Delete";
     del.onclick = () => deleteLevel(L);
-    item.append(play, up, down, edit, del);
+    item.append(play, board, up, down, edit, del);
     list.appendChild(item);
   });
 }
+
+// The little grey line under a level's name: the top score and your own best.
+function scoreLine(levelId) {
+  const top = leaderboardFor(levelId)[0];
+  if (!top) return "No scores yet — be the first!";
+  let line = "🏆 " + top.percent + "% " + escapeHtml(top.player);
+  const mine = myBest(levelId);
+  if (mine != null) line += "   ·   you " + mine + "%";
+  return line;
+}
+
+// Keep names safe to drop straight into the button's HTML.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+/* ================================================================
+   ==================  WHO'S PLAYING (the name)  =================
+   ================================================================ */
+
+// When the player changes, freshen the "Who's playing?" row.
+function updateNameBtn() { buildProfilePicker(); }
+
+// The name pop-up, now a promise: ask for a name and wait. Resolves to the typed
+// name, or null if they tapped Cancel. Reused for "New player" and first run.
+function askName(prefill) {
+  return new Promise(resolve => {
+    const box = document.getElementById("nameBox");
+    const input = document.getElementById("nameInput");
+    const okBtn = document.getElementById("nameOkBtn");
+    const cancelBtn = document.getElementById("nameCancelBtn");
+    input.maxLength = 20;               // player names are 1–20 letters
+    input.value = prefill || "";
+    box.classList.remove("hidden");
+    setTimeout(() => input.focus(), 50);
+    function done(val) {
+      box.classList.add("hidden");
+      okBtn.onclick = cancelBtn.onclick = input.onkeydown = null;
+      resolve(val);
+    }
+    okBtn.onclick = () => {
+      const name = input.value.trim();
+      if (!name) { showToast("Please type a name."); return; }
+      done(name);
+    };
+    cancelBtn.onclick = () => done(null);
+    input.onkeydown = e => { if (e.key === "Enter") okBtn.onclick(); };
+  });
+}
+
+// Draw a player's cube onto a little square canvas, for the menu buttons.
+function renderProfileCube(canvas, skin) {
+  const c = canvas.getContext("2d");
+  c.clearRect(0, 0, canvas.width, canvas.height);
+  drawPlayer(c, canvas.width / 2, canvas.height / 2, 0, skin, canvas.width * 0.62);
+}
+
+// Build the "Who's playing?" row on the menu: one cube button per saved player,
+// the current player highlighted, plus "Edit my cube" and "New player".
+function buildProfilePicker() {
+  const row = document.getElementById("profileRow");
+  if (!row) return;
+  row.innerHTML = "";
+
+  // The list of players to show. If this tablet has a name but no saved player
+  // yet (a fresh upgrade), show that name as a starter cube so the kid sees
+  // themselves right away; it becomes a real saved player when they first Save.
+  const shown = profiles.slice();
+  if (currentProfile && currentProfile.id == null &&
+      !shown.some(p => p.name === currentProfile.name)) {
+    shown.unshift(currentProfile);
+  }
+
+  for (const p of shown) {
+    const isCurrent = currentProfile &&
+      (p.id != null ? currentProfile.id === p.id : currentProfile === p);
+    const btn = document.createElement("button");
+    btn.className = "profileBtn" + (isCurrent ? " selected" : "");
+    const cv = document.createElement("canvas");
+    cv.width = 56; cv.height = 56;
+    btn.appendChild(cv);
+    renderProfileCube(cv, p.skin);
+    const nm = document.createElement("div");
+    nm.className = "pName"; nm.textContent = p.name;
+    btn.appendChild(nm);
+    btn.onclick = () => chooseProfile(p);
+    row.appendChild(btn);
+  }
+
+  // If a real (saved) player is chosen, offer to edit their cube.
+  if (currentProfile) {
+    const edit = document.createElement("button");
+    edit.className = "profileBtn add";
+    edit.innerHTML = "✎<div class='pName'>Edit my cube</div>";
+    edit.onclick = () => openSkinEditor(currentProfile);
+    row.appendChild(edit);
+  }
+
+  // Always offer to add a brand-new player.
+  const add = document.createElement("button");
+  add.className = "profileBtn add";
+  add.innerHTML = "＋<div class='pName'>New player</div>";
+  add.onclick = () => newProfile();
+  row.appendChild(add);
+}
+
+// Pick who's playing. This also becomes the name on your high scores and the
+// "Made by" on levels, so the cube you see and the name on the board match.
+function chooseProfile(p) {
+  currentProfile = p;
+  setPlayerName(p.name);       // setPlayerName calls updateNameBtn → rebuilds the row
+  buildMenu(serverLevels);     // your best scores show up in the level list
+}
+
+// Make a new player: ask for a name, then open the cube editor on a fresh cube.
+// Nothing is saved to the server until they tap Save (that's when the PIN asks).
+async function newProfile() {
+  const name = await askName("");
+  if (!name) return;
+  openSkinEditor({ id: null, name, skin: { ...DEFAULT_SKIN } });
+}
+
+/* ================================================================
+   ==================  THE CUBE (SKIN) EDITOR  ===================
+   ================================================================
+   Another page, just like the level editor. You pick colors, a shape,
+   a face, a trail, and an explosion, and watch a little cube run and
+   jump with your choices right away. "Save" stores it on the server. */
+
+// The cube we are editing right now. SK.skin is changed in place as you tap, so
+// the live preview (which reads SK.skin) shows every change on the next frame.
+const SK = { id: null, name: "", skin: { ...DEFAULT_SKIN } };
+
+// Open the cube editor for a player (real, or a brand-new {id:null,...} one).
+function openSkinEditor(profile) {
+  SK.id = profile.id != null ? profile.id : null;
+  SK.name = profile.name || "";
+  SK.skin = normalizeSkin(profile.skin);
+  document.getElementById("skinTitle").textContent = SK.name ? (SK.name + "'s Cube") : "My Cube";
+  buildSkinEditor();
+  S.screen = "skin";
+  showScreen("skinScreen");
+  startSkinPreview();
+}
+
+// Build one row of color swatches + a rainbow slider for one skin color.
+function colorRow(label, key, swatches) {
+  const row = document.createElement("div");
+  row.className = "skinRow";
+  row.innerHTML = "<span class='lbl'>" + label + "</span>";
+  const marks = [];                      // remember the swatch buttons so we can un-highlight
+  for (const hex of swatches) {
+    const sw = document.createElement("button");
+    sw.className = "swatch" + (SK.skin[key] === hex ? " selected" : "");
+    sw.style.background = hex;
+    sw.onclick = () => {
+      SK.skin[key] = hex;
+      marks.forEach(m => m.classList.remove("selected"));
+      sw.classList.add("selected");
+    };
+    marks.push(sw);
+    row.appendChild(sw);
+  }
+  // The rainbow slider makes any color you like. Using it clears the swatch pick.
+  const slider = document.createElement("input");
+  slider.type = "range"; slider.min = "0"; slider.max = "360"; slider.className = "hueSlider";
+  slider.oninput = () => {
+    SK.skin[key] = hslToHex(Number(slider.value));
+    marks.forEach(m => m.classList.remove("selected"));
+  };
+  row.appendChild(slider);
+  return row;
+}
+
+// Build one row of tappable option buttons (shape, face, trail, explosion).
+function optionRow(label, key, options, labels, onChange) {
+  const row = document.createElement("div");
+  row.className = "skinRow";
+  row.innerHTML = "<span class='lbl'>" + label + "</span>";
+  const marks = [];
+  options.forEach((opt, i) => {
+    const b = document.createElement("button");
+    b.className = "optBtn" + (SK.skin[key] === opt ? " selected" : "");
+    b.textContent = labels ? labels[i] : opt;
+    b.onclick = () => {
+      SK.skin[key] = opt;
+      marks.forEach(m => m.classList.remove("selected"));
+      b.classList.add("selected");
+      if (onChange) onChange();
+    };
+    marks.push(b);
+    row.appendChild(b);
+  });
+  return row;
+}
+
+// Build the whole set of choices under the preview.
+function buildSkinEditor() {
+  const wrap = document.getElementById("skinControls");
+  wrap.innerHTML = "";
+  wrap.appendChild(colorRow("Body", "bodyColor", SKIN_BODY_COLORS));
+  wrap.appendChild(colorRow("Outline", "outlineColor", SKIN_OUTLINE_COLORS));
+  wrap.appendChild(colorRow("Face", "faceColor", SKIN_FACE_COLORS));
+  wrap.appendChild(optionRow("Shape", "shape", SHAPES,
+    ["■ Square", "▢ Rounded", "● Circle", "◆ Diamond", "⬡ Hex"]));
+
+  // The face row. Choosing "emoji" shows a little box to type one emoji.
+  const emojiRow = document.createElement("div");
+  emojiRow.className = "skinRow";
+  emojiRow.style.display = SK.skin.face === "emoji" ? "flex" : "none";
+  emojiRow.innerHTML = "<span class='lbl'>Emoji</span>";
+  const emojiInput = document.createElement("input");
+  emojiInput.className = "modalInput"; emojiInput.style.maxWidth = "90px";
+  emojiInput.maxLength = 8; emojiInput.value = SK.skin.emoji;
+  emojiInput.oninput = () => {
+    const v = emojiInput.value.trim();
+    if (v) SK.skin.emoji = normalizeSkin({ emoji: v }).emoji;
+  };
+  emojiRow.appendChild(emojiInput);
+
+  wrap.appendChild(optionRow("Face", "face", FACES,
+    ["None", "Happy", "Cool", "Angry", "Silly", "Sleepy", "Robot", "Emoji"],
+    () => { emojiRow.style.display = SK.skin.face === "emoji" ? "flex" : "none"; }));
+  wrap.appendChild(emojiRow);
+
+  wrap.appendChild(optionRow("Trail", "trail", TRAIL_STYLES,
+    ["Off", "Fade", "Rainbow", "Bubbles"]));
+  wrap.appendChild(optionRow("Boom", "explosion", EXPLOSION_STYLES,
+    ["Squares", "Stars", "Confetti", "Emoji"]));
+}
+
+// ---- The live preview: a tiny cube running and jumping on a loop ----
+// It uses the SAME drawPlayer / drawTrail / renderParticles as the real game,
+// but with its own little world, so it never touches the real level.
+const PV = { x: 60, y: 0, vy: 0, rot: 0, onGround: true, dead: false, since: 0,
+             trail: [], particles: [], last: 0, lastTrail: 0 };
+
+function startSkinPreview() {
+  PV.x = 60; PV.y = 0; PV.vy = 0; PV.rot = 0; PV.onGround = true; PV.dead = false;
+  PV.trail = []; PV.particles = []; PV.last = 0; PV.since = 0;
+  requestAnimationFrame(skinPreviewFrame);
+}
+
+function previewJump() {
+  if (PV.onGround && !PV.dead) { PV.vy = -CONFIG.JUMP_POWER * 0.55; PV.onGround = false; }
+}
+
+function skinPreviewFrame(ts) {
+  if (S.screen !== "skin") return;        // left the page — stop the loop
+  requestAnimationFrame(skinPreviewFrame);
+  const cv = document.getElementById("skinPreview");
+  const c = cv.getContext("2d");
+  const dt = PV.last ? Math.min(0.05, (ts - PV.last) / 1000) : 0;
+  PV.last = ts;
+
+  const groundY = cv.height * 0.72;
+  const id = v => v;                       // preview draws in plain canvas pixels
+
+  if (!PV.dead) {
+    PV.vy += CONFIG.GRAVITY * dt; PV.y += PV.vy * dt; PV.since += dt;
+    if (PV.y >= groundY) {                 // landed
+      PV.y = groundY; PV.vy = 0; PV.onGround = true;
+      PV.rot = Math.round(PV.rot / 90) * 90;
+    } else {
+      PV.rot += CONFIG.SPIN_SPEED * dt;    // spin in the air
+    }
+    if (PV.onGround && PV.since > 1.2) { previewJump(); PV.since = 0; }
+    // feed the trail, the same way the game does
+    if (ts - PV.lastTrail > 40) {
+      PV.trail.push({ x: PV.x, y: PV.y, life: 1 });
+      if (PV.trail.length > 40) PV.trail.shift();
+      PV.lastTrail = ts;
+    }
+  }
+
+  // background + ground line
+  c.clearRect(0, 0, cv.width, cv.height);
+  c.fillStyle = "#14142c"; c.fillRect(0, 0, cv.width, cv.height);
+  c.fillStyle = "rgba(255,255,255,.5)";
+  c.fillRect(0, groundY + CONFIG.PLAYER_SIZE / 2, cv.width, 2);
+
+  const skin = normalizeSkin(SK.skin);
+  drawTrail(c, id, id, skin, dt, PV.trail, PV.dead);
+  if (!PV.dead) drawPlayer(c, PV.x, PV.y, PV.rot, skin);
+  renderParticles(c, id, id, dt, PV.particles);
+}
+
+// The "Try it out" button: blow the cube up so you can see the explosion, then
+// put it back together after a moment.
+function previewDeath() {
+  if (PV.dead) return;
+  PV.dead = true;
+  spawnExplosion(PV.x, PV.y, normalizeSkin(SK.skin), PV.particles);
+  setTimeout(() => {
+    PV.dead = false; PV.y = 0; PV.vy = 0; PV.onGround = false; PV.trail = []; PV.since = 0;
+  }, 1100);
+}
+
+// Save the cube to the server (creating a new player, or updating one). Same
+// PIN flow as saving a level.
+async function saveSkin() {
+  const body = { name: SK.name, skin: normalizeSkin(SK.skin) };
+  try {
+    let saved;
+    if (SK.id != null) saved = await apiWrite("PUT", "/profiles/" + SK.id, body);
+    else saved = await apiWrite("POST", "/profiles", body);
+    showToast("Saved!");
+    profiles = await apiGet("/profiles");
+    currentProfile = profiles.find(p => p.id === saved.id) || saved;
+    setPlayerName(currentProfile.name);
+    S.screen = "menu"; showScreen("menuScreen");
+    buildMenu(serverLevels);
+  } catch (e) { if (e.message !== "cancelled") showToast(e.message); }
+}
+
+document.getElementById("skinSaveBtn").onclick = saveSkin;
+document.getElementById("skinBackBtn").onclick = () => { S.screen = "menu"; showScreen("menuScreen"); };
+document.getElementById("skinDeathBtn").onclick = previewDeath;
+document.getElementById("skinPreview").addEventListener("pointerdown", e => { e.stopPropagation(); previewJump(); });
+
+/* ================================================================
+   =====================  THE 📊 LEADERBOARD  =====================
+   ================================================================ */
+
+// Show every player's best on one level, best first.
+function openScores(L) {
+  document.getElementById("scoresTitle").textContent = "🏆 " + L.name;
+  const listEl = document.getElementById("scoresList");
+  const board = leaderboardFor(L.id);
+  if (!board.length) {
+    listEl.innerHTML = '<div class="scoreRow">No scores yet — go play it!</div>';
+  } else {
+    listEl.innerHTML = board.map((s, i) => {
+      const mine = (s.player === playerName) ? " you" : "";
+      return '<div class="scoreRow' + (mine ? " me" : "") + '">' +
+        '<span>' + (i + 1) + ". " + escapeHtml(s.player) + '</span>' +
+        '<span>' + s.percent + '%</span></div>';
+    }).join("");
+  }
+  document.getElementById("scoresBox").classList.remove("hidden");
+}
+document.getElementById("scoresCloseBtn").onclick = () => document.getElementById("scoresBox").classList.add("hidden");
 
 // Is the "Practice mode" box ticked?
 function isPracticeOn() { return document.getElementById("practiceChk").checked; }
@@ -1063,8 +1876,9 @@ function menuMessage(msg) {
 document.getElementById("playAllBtn").onclick = startCampaign;
 
 document.getElementById("openEditorBtn").onclick = () => {
-  // Opening the editor from the menu starts a brand-new level.
-  ED.editingId = null; ED.author = "";
+  // Opening the editor from the menu starts a brand-new level. If this tablet
+  // knows who's playing, that's the author already — no need to ask.
+  ED.editingId = null; ED.author = playerName || "";
   S.screen = "editor"; showScreen("editorScreen"); drawEditor();
 };
 
@@ -1425,12 +2239,15 @@ async function saveToServer() {
   }
 }
 
-// The Save-pop-up: collects the name + author for a brand-new level.
+// The Save-pop-up: collects the name + author for a brand-new level. The author
+// is pre-filled with this tablet's player, so usually you just tap Save.
 function openSaveModal() {
   document.getElementById("saveNameInput").value = levelName();
-  document.getElementById("saveAuthorInput").value = ED.author || "";
+  document.getElementById("saveAuthorInput").value = ED.author || playerName || "";
   document.getElementById("saveBox").classList.remove("hidden");
-  setTimeout(() => document.getElementById("saveAuthorInput").focus(), 50);
+  // If we already know the author, jump to the name box instead.
+  const focusId = (ED.author || playerName) ? "saveNameInput" : "saveAuthorInput";
+  setTimeout(() => document.getElementById(focusId).focus(), 50);
 }
 document.getElementById("saveServerBtn").onclick = () => {
   // Ask for name + author on a brand-new level; otherwise save straight away.
@@ -1455,18 +2272,32 @@ document.getElementById("saveCancelBtn").onclick = () => document.getElementById
    levels from the server, then build the menu. If the server can't be
    reached we say so instead of showing a blank screen. */
 async function init() {
+  // Load the players (their cubes) on their own, so an older server without the
+  // profiles endpoint just shows "New player" instead of a broken menu.
+  try { profiles = await apiGet("/profiles"); } catch (e) { profiles = []; }
+  // Auto-pick who's playing: the saved player whose name matches this tablet's,
+  // or — if this tablet has a name but no saved player yet — show that name as a
+  // starter cube (it becomes a real saved player the first time they Save).
+  currentProfile = profiles.find(p => p.name === playerName)
+    || (playerName ? { id: null, name: playerName, skin: { ...DEFAULT_SKIN } } : null);
+  buildProfilePicker();
+
   try {
-    const [settings, levels] = await Promise.all([
+    const [settings, levels, scores] = await Promise.all([
       apiGet("/settings"),
       apiGet("/levels"),
+      apiGet("/scores"),
     ]);
     applySettings(settings);       // shared "Save for everyone" numbers
     serverLevels = levels;
+    serverScores = scores;
     buildMenu(levels);
   } catch (e) {
     console.error(e);
     menuMessage("Can't reach the game server. Make sure it's running, then reload.");
   }
+  // First time on this tablet (no name, no players)? Gently ask for a new player.
+  if (!playerName && !profiles.length) newProfile();
 }
 init();
 

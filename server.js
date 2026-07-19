@@ -44,12 +44,37 @@ const DATA_DIR = path.join(__dirname, "data");
 const BACKUP_DIR = path.join(DATA_DIR, "backups");
 const LEVELS_FILE = path.join(DATA_DIR, "levels.json");
 const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
+const SCORES_FILE = path.join(DATA_DIR, "scores.json");   // each player's best % per level
+const PROFILES_FILE = path.join(DATA_DIR, "profiles.json"); // players + their cube skins
 const KEEP_BACKUPS = 200;            // how many old copies of each file to keep
 
 // ---------- Rules for a valid level ----------
 const LEVEL_CHARS = new Set([".", "#", "^", "o", "*", "|", "/", "\\"]);
 const MAX_COLS = 500;
 const MAX_ROWS = 30;
+
+// ---------- Rules for a valid cube skin (looks only, never physics) ----------
+// A skin is a little bundle of choices about how a player's cube LOOKS.
+// The lists below are the only allowed choices for each part. Anything a
+// tablet sends that isn't in these lists is quietly swapped for the default,
+// so an old or broken skin can never crash the game.
+const SKIN_COLOR = /^#[0-9a-fA-F]{6}$/;                 // a color like "#7dff5e"
+const SKIN_SHAPES = new Set(["square", "rounded", "circle", "diamond", "hex"]);
+const SKIN_FACES = new Set(["none", "happy", "cool", "angry", "silly", "sleepy", "robot", "emoji"]);
+const SKIN_TRAILS = new Set(["off", "fade", "rainbow", "bubbles"]);
+const SKIN_EXPLOSIONS = new Set(["squares", "stars", "confetti", "emoji"]);
+// The classic green cube the game always had — every missing part falls back here.
+const DEFAULT_SKIN = {
+  bodyColor: "#7dff5e",
+  outlineColor: "#ffffff",
+  faceColor: "#05051a",
+  shape: "square",
+  face: "happy",
+  emoji: "😀",
+  trail: "fade",
+  explosion: "squares",
+};
+const MAX_NAME = 20;                 // a player name is 1–20 letters
 
 // The full list of CONFIG names the settings file is allowed to override.
 // (This must stay in sync with the CONFIG block in public/index.html.)
@@ -131,6 +156,14 @@ function ensureData() {
   if (!fs.existsSync(SETTINGS_FILE)) {
     fs.writeFileSync(SETTINGS_FILE, JSON.stringify({}, null, 2));
     console.log("Created data/settings.json (no overrides yet).");
+  }
+  if (!fs.existsSync(SCORES_FILE)) {
+    fs.writeFileSync(SCORES_FILE, JSON.stringify([], null, 2));
+    console.log("Created data/scores.json (no high scores yet).");
+  }
+  if (!fs.existsSync(PROFILES_FILE)) {
+    fs.writeFileSync(PROFILES_FILE, JSON.stringify([], null, 2));
+    console.log("Created data/profiles.json (no players yet).");
   }
 }
 
@@ -237,6 +270,87 @@ function validateSettings(body) {
     clean[key] = value;
   }
   return clean;
+}
+
+// A high score is one player's best on one level: which level, who, and how
+// far they got (0–100%). We check the level really exists so scores can't
+// pile up for a level nobody has.
+function validateScore(body, levels) {
+  const levelId = (body && Number.isFinite(body.levelId)) ? Math.floor(body.levelId) : null;
+  if (levelId === null || !levels.some(L => Number(L.id) === levelId)) {
+    throw new Error("That level does not exist.");
+  }
+  const player = (body && typeof body.player === "string") ? body.player.trim() : "";
+  if (!player) throw new Error("Please say who is playing.");
+
+  let percent = Number.isFinite(body.percent) ? Math.round(body.percent) : 0;
+  percent = Math.max(0, Math.min(100, percent));   // keep it inside 0–100
+  return { levelId, player: player.slice(0, 40), percent };
+}
+
+// Count how many WHOLE emoji are in a little string. Intl.Segmenter knows that
+// things like 👍🏽 or 👨‍👩‍👧 are one emoji even though they are several code points
+// glued together; if it isn't around we fall back to counting code points.
+function countEmoji(str) {
+  if (typeof Intl !== "undefined" && Intl.Segmenter) {
+    return [...new Intl.Segmenter().segment(str)].length;
+  }
+  return Array.from(str).length;
+}
+
+// Clean up one cube skin. We build a brand-new object with ONLY the parts we
+// allow, so any extra fields a tablet sends are dropped (this keeps us safe if
+// a newer game adds skin options we don't know about yet). Each part falls back
+// to the classic default if it's missing or looks wrong — EXCEPT a color that is
+// there but malformed, or an over-long "emoji", which we refuse loudly so a typo
+// doesn't silently turn green.
+function cleanSkin(raw) {
+  const s = (raw && typeof raw === "object" && !Array.isArray(raw)) ? raw : {};
+
+  const color = (value, fallback) => {
+    if (value == null) return fallback;                 // missing → default
+    if (typeof value !== "string" || !SKIN_COLOR.test(value)) {
+      throw new Error("A cube color must look like #7dff5e.");
+    }
+    return value.toLowerCase();
+  };
+  const choice = (value, allowed, fallback) =>
+    (typeof value === "string" && allowed.has(value)) ? value : fallback;
+
+  // The emoji is only used for the "emoji" face/explosion, but we always tidy it.
+  // We count whole emoji, so a 50-letter "emoji" is rejected but a fancy one-emoji
+  // like 👍🏽, 🇸🇪 or 👨‍👩‍👧 (which are secretly several letters glued together) still counts as ONE.
+  let emoji = DEFAULT_SKIN.emoji;
+  if (s.emoji != null) {
+    if (typeof s.emoji !== "string") throw new Error("That emoji looks wrong.");
+    const trimmed = s.emoji.trim();
+    if (trimmed) {
+      if (trimmed.length > 32 || countEmoji(trimmed) > 1) throw new Error("Please pick just one emoji.");
+      emoji = trimmed;
+    }
+  }
+
+  return {
+    bodyColor: color(s.bodyColor, DEFAULT_SKIN.bodyColor),
+    outlineColor: color(s.outlineColor, DEFAULT_SKIN.outlineColor),
+    faceColor: color(s.faceColor, DEFAULT_SKIN.faceColor),
+    shape: choice(s.shape, SKIN_SHAPES, DEFAULT_SKIN.shape),
+    face: choice(s.face, SKIN_FACES, DEFAULT_SKIN.face),
+    emoji,
+    trail: choice(s.trail, SKIN_TRAILS, DEFAULT_SKIN.trail),
+    explosion: choice(s.explosion, SKIN_EXPLOSIONS, DEFAULT_SKIN.explosion),
+  };
+}
+
+// A profile is one player: a name plus the cube skin they made. Returns the
+// tidy {name, skin}, or throws an Error with a message we can show the kids.
+function validateProfile(body) {
+  const name = (body && typeof body.name === "string") ? body.name.trim() : "";
+  if (!name) throw new Error("Please give your cube a name.");
+  if (Array.from(name).length > MAX_NAME) {
+    throw new Error("That name is too long (max " + MAX_NAME + " letters).");
+  }
+  return { name: name.slice(0, MAX_NAME), skin: cleanSkin(body && body.skin) };
 }
 
 /* ================================================================
@@ -349,6 +463,87 @@ app.put("/api/settings", guard, (req, res) => {
 
   writeJsonWithBackup(SETTINGS_FILE, clean);
   res.json(clean);
+});
+
+// ---------- Profiles (players + their cube skins) ----------
+// Same pattern as levels: anyone can read, but making or changing a player
+// needs the family PIN and is frozen by READ_ONLY. Skins are looks only.
+app.get("/api/profiles", (req, res) => {
+  res.json(readJson(PROFILES_FILE));
+});
+
+app.post("/api/profiles", guard, (req, res) => {
+  let clean;
+  try { clean = validateProfile(req.body); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+
+  const profiles = readJson(PROFILES_FILE);
+  const nextId = profiles.reduce((m, P) => Math.max(m, Number(P.id) || 0), 0) + 1;
+  const profile = { id: nextId, ...clean, updatedAt: new Date().toISOString() };
+  profiles.push(profile);
+  writeJsonWithBackup(PROFILES_FILE, profiles);
+  res.status(201).json(profile);
+});
+
+app.put("/api/profiles/:id", guard, (req, res) => {
+  let clean;
+  try { clean = validateProfile(req.body); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+
+  const id = Number(req.params.id);
+  const profiles = readJson(PROFILES_FILE);
+  const i = profiles.findIndex(P => Number(P.id) === id);
+  if (i === -1) return res.status(404).json({ error: "That player does not exist." });
+
+  profiles[i] = { id, ...clean, updatedAt: new Date().toISOString() };
+  writeJsonWithBackup(PROFILES_FILE, profiles);
+  res.json(profiles[i]);
+});
+
+app.delete("/api/profiles/:id", guard, (req, res) => {
+  const id = Number(req.params.id);
+  const profiles = readJson(PROFILES_FILE);
+  const i = profiles.findIndex(P => Number(P.id) === id);
+  if (i === -1) return res.status(404).json({ error: "That player does not exist." });
+
+  const [removed] = profiles.splice(i, 1);
+  writeJsonWithBackup(PROFILES_FILE, profiles);
+  res.json(removed);
+});
+
+// ---------- High scores ----------
+// Anyone can read the scores.
+app.get("/api/scores", (req, res) => {
+  res.json(readJson(SCORES_FILE));
+});
+
+// Saving a score does NOT need the family PIN — kids play (and beat their best)
+// all the time, and asking for the PIN on every run would be no fun. It is still
+// frozen by READ_ONLY, so a "look but don't touch" server keeps its scores as-is.
+app.post("/api/scores", notFrozen, (req, res) => {
+  const levels = readJson(LEVELS_FILE);
+  let clean;
+  try { clean = validateScore(req.body, levels); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+
+  const scores = readJson(SCORES_FILE);
+  // One row per (level, player). Only write when this beats their old best.
+  const row = scores.find(s => Number(s.levelId) === clean.levelId && s.player === clean.player);
+  if (!row) {
+    scores.push({ ...clean, updatedAt: new Date().toISOString() });
+    writeJsonWithBackup(SCORES_FILE, scores);
+  } else if (clean.percent > row.percent) {
+    row.percent = clean.percent;
+    row.updatedAt = new Date().toISOString();
+    writeJsonWithBackup(SCORES_FILE, scores);
+  }
+
+  // Send back just this level's leaderboard, best first, so the tablet can
+  // update what it shows without re-fetching everything.
+  const board = scores
+    .filter(s => Number(s.levelId) === clean.levelId)
+    .sort((a, b) => b.percent - a.percent);
+  res.json(board);
 });
 
 app.listen(PORT, () => {
