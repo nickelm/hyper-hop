@@ -325,6 +325,10 @@ const CONFIG = {
   // ---------- PLATFORMS & BRIDGES ----------
   BRIDGE_FADE_TIME: 0.8,  // once you run past a  -  bridge tile, how long it takes to fade away (seconds)
 
+  // ---------- PORTALS (the gates you run through) ----------
+  FAST_MULT: 1.5,         // a  >  gate makes the world scroll this many times normal speed
+  SLOW_MULT: 0.75,        // a  <  gate makes it this many times normal speed (less than 1 = slower)
+
   // ---------- SIZES ----------
   TILE: 40,               // size of one grid square. Everything is built from these
   PLAYER_SIZE: 34,        // how big the cube is (should be a bit smaller than TILE)
@@ -493,6 +497,8 @@ function normalizeSkin(raw) {
        U  = catapult (flings you way up high!)
        s  = saw blade (a spinning circle — deadly!)
        @  = checkpoint (touch it, and a death sends you back here, not the start)
+       >  = fast portal (run through to speed the world up)
+       <  = slow portal (run through to slow the world down)
 
    The floor is automatic — you do not need to draw it.
    The bottom row of letters sits right on the floor.
@@ -575,6 +581,7 @@ let squash = 0;         // brief squash-and-stretch on the cube after a catapult
 let tileCheckpoint = null;         // the last  @  checkpoint you touched (a respawn snapshot), or null
 let activatedCheckpoints = new Set(); // "col,row" of every  @  you've lit up this run (for drawing them lit)
 let checkpointTagT = 0;            // seconds left to show the little "from checkpoint" tag after a respawn
+let speedMult = 1;                 // how fast the world scrolls right now: 1 normal, set by  >  and  <  gates
 
 // The music calls this on every step. There are 2 steps per beat, so the
 // even ones (0, 2, 4...) are the beats — that's when we flash the world.
@@ -611,6 +618,7 @@ function resetRun() {
   tileCheckpoint = null;               // a full restart forgets your  @  checkpoint...
   activatedCheckpoints = new Set();    // ...and all the flags go back to unlit
   checkpointTagT = 0;
+  speedMult = 1;                       // back to normal speed
   totalCoins = 0;
   for (const row of S.level.grid) for (const c of row) if (c === "*") totalCoins++;
   // Restart the tune from the very beginning so obstacles line up with the
@@ -627,6 +635,7 @@ function dropCheckpoint() {
     x: player.x, y: player.y, vy: player.vy, rot: player.rot,
     onGround: player.onGround, camX: camX,
     coins: new Set(coinsGot),          // remember which coins were already grabbed
+    speedMult: speedMult,              // and the speed you were going
   });
   sfx.coin();
 }
@@ -643,6 +652,7 @@ function restoreCheckpoint() {
              onGround: cp.onGround, dead: false, won: false };
   camX = cp.camX;
   coinsGot = new Set(cp.coins);
+  speedMult = (cp.speedMult != null) ? cp.speedMult : 1;   // restore the speed too
   bridgeFades = {};                    // bridges come back solid on a respawn
   particles = []; trail = []; shake = 0; winT = 0; deadT = 0;
   runPercent = 0; runWasBest = false;
@@ -657,6 +667,7 @@ function dropTileCheckpoint(col, row) {
     x: player.x, y: player.y, vy: player.vy, rot: player.rot,
     onGround: player.onGround, camX: camX,
     coins: new Set(coinsGot),          // the coins you'd grabbed by this point
+    speedMult: speedMult,              // and how fast you were going
   };
   activatedCheckpoints.add(col + "," + row);   // this flag now shows up lit
 }
@@ -670,6 +681,7 @@ function restoreTileCheckpoint() {
              onGround: cp.onGround, onRamp: 0, dead: false, won: false };
   camX = cp.camX;
   coinsGot = new Set(cp.coins);
+  speedMult = cp.speedMult;            // back to the speed you had at the checkpoint
   bridgeFades = {};                    // bridges come back solid on a respawn
   squash = 0;
   particles = []; trail = []; shake = 0; winT = 0; deadT = 0;
@@ -678,6 +690,17 @@ function restoreTileCheckpoint() {
 }
 
 // ---------------- Geometry helpers ----------------
+// Look down a whole column for a speed portal ( >  or  < ). Returns the character,
+// or null. Portals fill the column, so height doesn't matter — any row counts.
+function portalInColumn(col) {
+  if (col < 0 || col >= S.level.cols) return null;
+  for (let row = 0; row < S.level.rows; row++) {
+    const ch = S.level.grid[row][col];
+    if (ch === ">" || ch === "<") return ch;
+  }
+  return null;
+}
+
 // World: floor is at y = 0, up is negative y. Grid row (rows-1) sits on the floor.
 function tileAt(col, row) {
   if (col < 0 || col >= S.level.cols || row < 0 || row >= S.level.rows) return ".";
@@ -693,10 +716,26 @@ function physicsStep(dt) {
   if (player.dead || player.won) return;
   const T = CONFIG.TILE, half = CONFIG.PLAYER_SIZE / 2;
 
-  player.x += CONFIG.SCROLL_SPEED * dt;
-  camX += CONFIG.SCROLL_SPEED * dt;
+  const prevX = player.x;                    // remember where we were, for portal crossings
+  player.x += CONFIG.SCROLL_SPEED * speedMult * dt;
+  camX += CONFIG.SCROLL_SPEED * speedMult * dt;
   player.vy += CONFIG.GRAVITY * dt;
   player.y += player.vy * dt;
+
+  // ---- portals: gates that fill a whole column and fire when the cube's CENTER
+  // crosses the column's middle (so they work at any height). A  >  speeds the
+  // world up, a  <  slows it down — absolute, not stacking (the newest one wins).
+  {
+    const colA = Math.floor(prevX / T) - 1, colB = Math.floor(player.x / T) + 1;
+    for (let c = colA; c <= colB; c++) {
+      const mid = c * T + T / 2;
+      if (prevX < mid && player.x >= mid) {   // just crossed this column's midline
+        const p = portalInColumn(c);
+        if (p === ">") speedMult = CONFIG.FAST_MULT;
+        else if (p === "<") speedMult = CONFIG.SLOW_MULT;
+      }
+    }
+  }
 
   // spin in the air, snap when landed
   if (!player.onGround) player.rot += CONFIG.SPIN_SPEED * dt;
@@ -1195,6 +1234,25 @@ function draw(dt) {
         ctx.beginPath();
         ctx.moveTo(poleX, flagY); ctx.lineTo(poleX + 16, flagY + 6); ctx.lineTo(poleX, flagY + 12);
         ctx.closePath(); ctx.fill();
+      } else if (ch === ">" || ch === "<") {
+        // a full-height shimmering gate filling this column. Green = faster, blue = slower.
+        const topY = sy(cellTop(0)), botY = sy(0), gh = botY - topY;
+        const color = ch === ">" ? "#3dff7a" : "#3aa0ff";
+        ctx.save();
+        ctx.globalAlpha = 0.22; ctx.fillStyle = color; ctx.fillRect(x, topY, T, gh);
+        ctx.globalAlpha = 0.9;                          // bright edges
+        ctx.fillRect(x, topY, 3, gh); ctx.fillRect(x + T - 3, topY, 3, gh);
+        ctx.globalAlpha = 0.5;                          // shimmer lines drifting upward
+        const t2 = performance.now() / 400;
+        for (let k = 0; k < 3; k++) {
+          const yy = botY - (((t2 + k / 3) % 1) * gh);
+          ctx.fillRect(x + 4, yy, T - 8, 3);
+        }
+        ctx.globalAlpha = 1; ctx.fillStyle = "#fff";    // an arrow hint in the middle
+        ctx.font = "bold 20px Trebuchet MS"; ctx.textAlign = "center";
+        ctx.fillText(ch === ">" ? "»" : "«", x + T/2, topY + gh/2 + 7);
+        ctx.textAlign = "left";
+        ctx.restore();
       } else if (ch === "=" || ch === "-") {
         // A thin slab across the top third of the tile (that's the part you land on).
         const th = T / 3;
@@ -2240,6 +2298,9 @@ const TOOLS = [
   { ch: "U", icon: "\u222a", label: "catapult" },    // \u222a bucket = catapult
   { sep: true },                                      // ---- hazards ----
   { ch: "s", icon: "\u2699", label: "saw" },         // \u2699 gear = spinning saw blade
+  { sep: true },                                      // ---- portals ----
+  { ch: ">", icon: "\u00bb", label: "fast portal" },  // \u00bb = speed up
+  { ch: "<", icon: "\u00ab", label: "slow portal" },  // \u00ab = slow down
   { sep: true },                                      // ---- checkpoint ----
   { ch: "@", icon: "\u2691", label: "checkpoint" },  // \u2691 flag = checkpoint
 ];
@@ -2300,6 +2361,12 @@ function drawEditor() {
       eCtx.beginPath(); eCtx.moveTo(x+c/2, y+c-3); eCtx.lineTo(x+c/2, y+4); eCtx.stroke();
       eCtx.fillStyle = "#7dff5e";
       eCtx.beginPath(); eCtx.moveTo(x+c/2, y+4); eCtx.lineTo(x+c/2+10, y+9); eCtx.lineTo(x+c/2, y+14); eCtx.closePath(); eCtx.fill();
+    }
+    else if (ch === ">" || ch === "<") {   // a speed portal (green fast / blue slow)
+      eCtx.fillStyle = ch === ">" ? "#3dff7a" : "#3aa0ff";
+      eCtx.globalAlpha = 0.5; eCtx.fillRect(x+2, y+2, c-4, c-4); eCtx.globalAlpha = 1;
+      eCtx.fillStyle = "#fff"; eCtx.font = "bold 18px Trebuchet MS"; eCtx.textAlign = "center";
+      eCtx.fillText(ch === ">" ? "»" : "«", x+c/2, y+c/2+6); eCtx.textAlign = "left";
     }
     else if (ch === "U") {   // a little yellow bucket
       eCtx.fillStyle = CONFIG.CATAPULT_COLOR;

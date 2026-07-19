@@ -61,7 +61,15 @@ U  catapult (a huge launch at CONFIG.CATAPULT_POWER; yellow bucket, dramatic sou
 s  saw blade (death; circular hitbox radius CONFIG.SAW_RADIUS*TILE, circle-vs-box; spinning disc, spin is cosmetic)
 @  checkpoint (silent respawn snapshot: x/y, gravity, speed, coins; NOT bridges. Death respawns here; a full
    restart or level change clears it and restarts music. Small flag, lit once activated)
+>  fast portal   (scroll speed becomes SCROLL_SPEED * CONFIG.FAST_MULT)
+<  slow portal   (scroll speed becomes SCROLL_SPEED * CONFIG.SLOW_MULT)
 ```
+
+Speed portals (`>` `<`) are full-column gates: crossing the column's midline (at
+any height) sets the scroll speed **absolutely** (not stacking) to the most
+recently passed portal's multiplier. Speed resets to normal only via a portal of
+the other kind, on death (restoring the checkpoint snapshot's speed), or on a full
+restart. Portals never kill.
 
 Jump-through platforms (`=` `-`) are one-way: the cube lands on the top when
 falling, but passes straight through them from below and from the sides, and they
