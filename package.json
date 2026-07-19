@@ -1,0 +1,13 @@
+{
+  "name": "hyper-hop",
+  "version": "1.0.0",
+  "description": "Hyper Hop — a Geometry Dash-style auto-runner, now with a tiny Node server so the kids can save levels and settings from their tablets.",
+  "license": "MIT",
+  "author": "Niklas Elmqvist",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

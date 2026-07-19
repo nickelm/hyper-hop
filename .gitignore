@@ -10,3 +10,12 @@ desktop.ini
 
 # Dropbox conflict copies
 *conflicted copy*
+
+# Node
+node_modules/
+
+# Server runtime state — levels, settings, and backups live here.
+# These are created and filled in on the server (seeded on first run),
+# so we keep them OUT of git on purpose. Durability comes from the
+# backups/ folder + the droplet, not from commits.
+data/
