@@ -59,6 +59,8 @@ o  bounce pad (launches upward at CONFIG.PAD_POWER)
 p  small bounce pad (like `o`, gentler, CONFIG.SMALL_PAD_POWER; pink)
 U  catapult (a huge launch at CONFIG.CATAPULT_POWER; yellow bucket, dramatic sound + cosmetic squash-stretch)
 s  saw blade (death; circular hitbox radius CONFIG.SAW_RADIUS*TILE, circle-vs-box; spinning disc, spin is cosmetic)
+@  checkpoint (silent respawn snapshot: x/y, gravity, speed, coins; NOT bridges. Death respawns here; a full
+   restart or level change clears it and restarts music. Small flag, lit once activated)
 ```
 
 Jump-through platforms (`=` `-`) are one-way: the cube lands on the top when

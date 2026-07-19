@@ -492,6 +492,7 @@ function normalizeSkin(raw) {
        p  = small pad (a gentle bounce — like o but smaller)
        U  = catapult (flings you way up high!)
        s  = saw blade (a spinning circle — deadly!)
+       @  = checkpoint (touch it, and a death sends you back here, not the start)
 
    The floor is automatic — you do not need to draw it.
    The bottom row of letters sits right on the floor.
@@ -571,6 +572,9 @@ let profiles = [];        // every saved player, from the server: {id, name, ski
 let currentProfile = null;// who is playing right now; null means "nobody picked" (default cube)
 let bridgeFades = {};   // "col,row" -> how visible a  -  bridge still is (1 = solid, 0 = gone). Cosmetic only.
 let squash = 0;         // brief squash-and-stretch on the cube after a catapult launch (1 = full, 0 = none). Cosmetic.
+let tileCheckpoint = null;         // the last  @  checkpoint you touched (a respawn snapshot), or null
+let activatedCheckpoints = new Set(); // "col,row" of every  @  you've lit up this run (for drawing them lit)
+let checkpointTagT = 0;            // seconds left to show the little "from checkpoint" tag after a respawn
 
 // The music calls this on every step. There are 2 steps per beat, so the
 // even ones (0, 2, 4...) are the beats — that's when we flash the world.
@@ -604,6 +608,9 @@ function resetRun() {
   coinsGot = new Set();
   bridgeFades = {};                    // every  -  bridge is solid again at the start of a run
   squash = 0;                          // no leftover catapult stretch
+  tileCheckpoint = null;               // a full restart forgets your  @  checkpoint...
+  activatedCheckpoints = new Set();    // ...and all the flags go back to unlit
+  checkpointTagT = 0;
   totalCoins = 0;
   for (const row of S.level.grid) for (const c of row) if (c === "*") totalCoins++;
   // Restart the tune from the very beginning so obstacles line up with the
@@ -639,6 +646,35 @@ function restoreCheckpoint() {
   bridgeFades = {};                    // bridges come back solid on a respawn
   particles = []; trail = []; shake = 0; winT = 0; deadT = 0;
   runPercent = 0; runWasBest = false;
+}
+
+// ---------------- Checkpoints (the  @  tiles) ----------------
+// Touching a  @  quietly saves where you are. A death then sends you back here
+// instead of all the way to the start. Touching a later  @  replaces the old one.
+// (Speed and gravity get saved into this snapshot too, in the later stages.)
+function dropTileCheckpoint(col, row) {
+  tileCheckpoint = {
+    x: player.x, y: player.y, vy: player.vy, rot: player.rot,
+    onGround: player.onGround, camX: camX,
+    coins: new Set(coinsGot),          // the coins you'd grabbed by this point
+  };
+  activatedCheckpoints.add(col + "," + row);   // this flag now shows up lit
+}
+// Come back to life at the checkpoint. Still counts as a new attempt, and the
+// music keeps playing (it only restarts on a full restart or a new level).
+function restoreTileCheckpoint() {
+  const cp = tileCheckpoint;
+  attempts++;
+  document.getElementById("attempts").textContent = "Attempt " + attempts;
+  player = { x: cp.x, y: cp.y, vy: cp.vy, rot: cp.rot,
+             onGround: cp.onGround, onRamp: 0, dead: false, won: false };
+  camX = cp.camX;
+  coinsGot = new Set(cp.coins);
+  bridgeFades = {};                    // bridges come back solid on a respawn
+  squash = 0;
+  particles = []; trail = []; shake = 0; winT = 0; deadT = 0;
+  runPercent = 0; runWasBest = false;
+  checkpointTagT = 2;                  // show "from checkpoint" for 2 seconds
 }
 
 // ---------------- Geometry helpers ----------------
@@ -756,6 +792,9 @@ function physicsStep(dt) {
       } else if (ch === "*") {
         const key = col + "," + row;
         if (!coinsGot.has(key) && overlapX && overlapY) { coinsGot.add(key); sfx.coin(); }
+      } else if (ch === "@") {
+        // checkpoint: quietly save this spot as your new respawn point
+        if (overlapX && overlapY) dropTileCheckpoint(col, row);
       } else if (ch === "|") {
         if (player.x + half > tx) win();
       } else if (ch === "=" || ch === "-") {
@@ -1145,6 +1184,17 @@ function draw(dt) {
           ctx.fillStyle = f % 2 ? "#fff" : "#111";
           ctx.fillRect(x + T/2 + 3, y - T + f * 10, 26, 10);
         }
+      } else if (ch === "@") {
+        // a little checkpoint flag. Once you've touched it, it lights up green
+        // and raises to the top of its pole.
+        const lit = activatedCheckpoints.has(col + "," + row);
+        const poleX = x + T/2, flagY = y + (lit ? 2 : 12);
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(poleX, y + T); ctx.lineTo(poleX, flagY); ctx.stroke();
+        ctx.fillStyle = lit ? "#7dff5e" : "#8a8aa0";   // lit = bright green, else grey
+        ctx.beginPath();
+        ctx.moveTo(poleX, flagY); ctx.lineTo(poleX + 16, flagY + 6); ctx.lineTo(poleX, flagY + 12);
+        ctx.closePath(); ctx.fill();
       } else if (ch === "=" || ch === "-") {
         // A thin slab across the top third of the tile (that's the part you land on).
         const th = T / 3;
@@ -1216,6 +1266,15 @@ function draw(dt) {
   ctx.fillText("\u25CF " + coinsGot.size + " / " + totalCoins, W - 16, 30);
   ctx.textAlign = "left";
 
+  // "from checkpoint" tag under the attempt counter, for a couple of seconds
+  if (checkpointTagT > 0) {
+    checkpointTagT = Math.max(0, checkpointTagT - dt);
+    ctx.globalAlpha = Math.min(1, checkpointTagT);   // gently fade away at the end
+    ctx.fillStyle = "#7dff5e"; ctx.font = "bold 15px Trebuchet MS"; ctx.textAlign = "center";
+    ctx.fillText("from checkpoint", W / 2, 60);
+    ctx.textAlign = "left"; ctx.globalAlpha = 1;
+  }
+
   // win / death overlays
   if (player.won) {
     winT += dt;
@@ -1253,10 +1312,11 @@ function draw(dt) {
       }
       ctx.textAlign = "left";
     }
-    // In practice mode with a flag dropped, come back at the newest flag.
-    // Otherwise (or with no flags yet) start the whole level over.
+    // Come back at: a practice-mode flag if you dropped one, else your latest
+    //  @  checkpoint, else start the whole level over.
     if (deadT > 0.9) {
       if (S.practice && checkpoints.length > 0) restoreCheckpoint();
+      else if (tileCheckpoint) restoreTileCheckpoint();
       else resetRun();
     }
   }
@@ -2180,6 +2240,8 @@ const TOOLS = [
   { ch: "U", icon: "\u222a", label: "catapult" },    // \u222a bucket = catapult
   { sep: true },                                      // ---- hazards ----
   { ch: "s", icon: "\u2699", label: "saw" },         // \u2699 gear = spinning saw blade
+  { sep: true },                                      // ---- checkpoint ----
+  { ch: "@", icon: "\u2691", label: "checkpoint" },  // \u2691 flag = checkpoint
 ];
 const paletteEl = document.getElementById("palette");
 TOOLS.forEach(t => {
@@ -2233,6 +2295,12 @@ function drawEditor() {
     }
     else if (ch === "p") { eCtx.fillStyle = CONFIG.SMALL_PAD_COLOR; eCtx.fillRect(x+c/3, y+c-8, c/3, 5); }
     else if (ch === "s") { eCtx.fillStyle = CONFIG.SPIKE_COLOR; eCtx.beginPath(); eCtx.arc(x+c/2, y+c/2, c*CONFIG.SAW_RADIUS, 0, 7); eCtx.fill(); }
+    else if (ch === "@") {   // a little checkpoint flag
+      eCtx.strokeStyle = "#fff"; eCtx.lineWidth = 2;
+      eCtx.beginPath(); eCtx.moveTo(x+c/2, y+c-3); eCtx.lineTo(x+c/2, y+4); eCtx.stroke();
+      eCtx.fillStyle = "#7dff5e";
+      eCtx.beginPath(); eCtx.moveTo(x+c/2, y+4); eCtx.lineTo(x+c/2+10, y+9); eCtx.lineTo(x+c/2, y+14); eCtx.closePath(); eCtx.fill();
+    }
     else if (ch === "U") {   // a little yellow bucket
       eCtx.fillStyle = CONFIG.CATAPULT_COLOR;
       eCtx.fillRect(x+3, y+c-6, c-6, 4);            // base
