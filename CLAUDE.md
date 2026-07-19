@@ -58,6 +58,7 @@ o  bounce pad (launches upward at CONFIG.PAD_POWER)
 -  disappearing bridge (same physics as `=`; fades away once passed, CONFIG.BRIDGE_FADE_TIME; cosmetic)
 p  small bounce pad (like `o`, gentler, CONFIG.SMALL_PAD_POWER; pink)
 U  catapult (a huge launch at CONFIG.CATAPULT_POWER; yellow bucket, dramatic sound + cosmetic squash-stretch)
+s  saw blade (death; circular hitbox radius CONFIG.SAW_RADIUS*TILE, circle-vs-box; spinning disc, spin is cosmetic)
 ```
 
 Jump-through platforms (`=` `-`) are one-way: the cube lands on the top when

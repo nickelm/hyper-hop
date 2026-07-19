@@ -329,6 +329,7 @@ const CONFIG = {
   TILE: 40,               // size of one grid square. Everything is built from these
   PLAYER_SIZE: 34,        // how big the cube is (should be a bit smaller than TILE)
   SPIKE_MERCY: 0.35,      // how forgiving spikes are (0 = brutal, 0.5 = very kind)
+  SAW_RADIUS: 0.38,       // how big a saw blade ( s ) is, as a fraction of a tile (round deadly circle)
 
   // ---------- LOOKS ----------
   PLAYER_COLOR: "#7dff5e",     // the cube. Try "#ff5ec6" or "#ffe14d"
@@ -490,6 +491,7 @@ function normalizeSkin(raw) {
        -  = disappearing bridge (works like = , but fades away once you run past it)
        p  = small pad (a gentle bounce — like o but smaller)
        U  = catapult (flings you way up high!)
+       s  = saw blade (a spinning circle — deadly!)
 
    The floor is automatic — you do not need to draw it.
    The bottom row of letters sits right on the floor.
@@ -729,6 +731,15 @@ function physicsStep(dt) {
         const hx = tx + m, hw = T - 2 * m, hy = ty + m, hh = T - m;
         if (player.x + half > hx && player.x - half < hx + hw &&
             player.y + half > hy && player.y - half < hy + hh) die();
+      } else if (ch === "s") {
+        // saw blade: a round deadly circle in the middle of the tile.
+        // Find the point on the cube's box closest to the circle's center;
+        // if that point is inside the circle, the saw got us.
+        const cx = tx + T/2, cy = ty + T/2, rad = CONFIG.SAW_RADIUS * T;
+        const nearestX = Math.max(player.x - half, Math.min(cx, player.x + half));
+        const nearestY = Math.max(player.y - half, Math.min(cy, player.y + half));
+        const dx = cx - nearestX, dy = cy - nearestY;
+        if (dx*dx + dy*dy < rad*rad) die();
       } else if (ch === "o") {
         if (overlapX && player.y + half > ty + T * 0.4) {
           player.vy = -CONFIG.PAD_POWER; player.onGround = false; sfx.pad();
@@ -1085,6 +1096,25 @@ function draw(dt) {
         ctx.beginPath(); ctx.moveTo(x + T/2, y + 2); ctx.lineTo(x + T - 3, y + T); ctx.lineTo(x + 3, y + T);
         ctx.closePath(); ctx.fill();
         ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
+      } else if (ch === "s") {
+        // a spinning toothed saw disc (the spin is only for looks)
+        const cx = x + T/2, cy = y + T/2, rad = CONFIG.SAW_RADIUS * T;
+        const spin = performance.now() / 200;
+        ctx.save();
+        ctx.translate(cx, cy); ctx.rotate(spin);
+        ctx.fillStyle = CONFIG.SPIKE_COLOR;
+        const teeth = 8;
+        ctx.beginPath();
+        for (let i = 0; i < teeth * 2; i++) {
+          const rr = (i % 2 === 0) ? rad : rad * 0.68;   // tooth tip, then notch
+          const a = (i / (teeth * 2)) * Math.PI * 2;
+          const px = Math.cos(a) * rr, py = Math.sin(a) * rr;
+          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "#fff";                          // hub in the middle
+        ctx.beginPath(); ctx.arc(0, 0, rad * 0.28, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
       } else if (ch === "o") {
         ctx.fillStyle = CONFIG.PAD_COLOR;
         ctx.beginPath(); ctx.ellipse(x + T/2, y + T - 6, T/2 - 3, 8, 0, Math.PI, 0);
@@ -2148,6 +2178,8 @@ const TOOLS = [
   { sep: true },                                      // ---- boosts ----
   { ch: "p", icon: "\u2022", label: "small pad" },   // \u2022 small dot = little pink pad
   { ch: "U", icon: "\u222a", label: "catapult" },    // \u222a bucket = catapult
+  { sep: true },                                      // ---- hazards ----
+  { ch: "s", icon: "\u2699", label: "saw" },         // \u2699 gear = spinning saw blade
 ];
 const paletteEl = document.getElementById("palette");
 TOOLS.forEach(t => {
@@ -2200,6 +2232,7 @@ function drawEditor() {
       for (let p = 0; p < 3; p++) eCtx.fillRect(x + 2 + p * (plank + 2), y + 2, plank, c/3);
     }
     else if (ch === "p") { eCtx.fillStyle = CONFIG.SMALL_PAD_COLOR; eCtx.fillRect(x+c/3, y+c-8, c/3, 5); }
+    else if (ch === "s") { eCtx.fillStyle = CONFIG.SPIKE_COLOR; eCtx.beginPath(); eCtx.arc(x+c/2, y+c/2, c*CONFIG.SAW_RADIUS, 0, 7); eCtx.fill(); }
     else if (ch === "U") {   // a little yellow bucket
       eCtx.fillStyle = CONFIG.CATAPULT_COLOR;
       eCtx.fillRect(x+3, y+c-6, c-6, 4);            // base
