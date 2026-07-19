@@ -2,7 +2,8 @@
    music.js — Hyper Hop's built-in chiptune band
    ================================================================
    No audio files! This makes music out of math, like a Game Boy.
-   The tune is written in the MUSIC block below. Edit it!
+   The tunes are written in the SONGS list below. Edit them, or add
+   your own — every level picks a song to play.
 
    How to write music here:
    - Notes look like  E4  G4  C5  F#4  Bb3  (letter + optional #/b + octave)
@@ -11,26 +12,75 @@
    - Every note is one "step" = an eighth note. 8 steps = 1 bar.
    - All tracks loop forever, so patterns can be different lengths
      (the drums are 1 bar, the melody is 4 bars — they still fit!)
+
+   About BPM (how fast the song goes):
+   - At the default speed (SCROLL_SPEED 360, TILE 40) the cube travels
+     540 / BPM tiles every beat. Pick a BPM that divides evenly so
+     obstacles land ON the beat:
+         BPM 90  -> 6 tiles per beat  (slow)
+         BPM 108 -> 5 tiles per beat  (relaxed)
+         BPM 135 -> 4 tiles per beat  (normal — the classic Hyper Hop feel)
+         BPM 180 -> 3 tiles per beat  (fast)
    ================================================================ */
 
 const MUSIC = {
-  ON: true,
-  BPM: 135,          // beats per minute. At 135 BPM the cube travels exactly
-                     // 4 tiles per beat (with SCROLL_SPEED 360 and TILE 40),
-                     // so obstacles placed every 4 tiles land ON the beat!
-  VOLUME: 0.5,       // 0 = silent, 1 = loud
-
-  // The band: four tracks playing at once
-  LEAD: `E4 .  G4 A4 B4 .  A4 G4 | E4 .  G4 A4 B4 .  D5 B4 |
-         C5 .  B4 A4 G4 .  A4 B4 | A4 .  F#4 A4 E4 .  .  . `,
-
-  BASS: `E2 E2 E3 E2 E2 E2 E3 E2 | E2 E2 E3 E2 E2 E2 E3 E2 |
-         C2 C2 C3 C2 C2 C2 C3 C2 | D2 D2 D3 D2 D2 D2 D3 D2`,
-
-  KICK:  `x . . . x . . .`,
-  SNARE: `. . x . . . x .`,
-  HAT:   `x x x x x x x x`,
+  ON: true,          // master switch for ALL music. false = total silence
+  VOLUME: 0.5,       // 0 = silent, 1 = loud (the game can change this live)
 };
+
+// The jukebox! Each song is a little band of tracks that play at once.
+// Levels choose a song by its position in this list (0 = the first one).
+const SONGS = [
+
+  {
+    name: "Hyper Hop",          // the classic theme — bright and bouncy (E minor)
+    BPM: 135,                   // 4 tiles per beat
+    LEAD: `E4 .  G4 A4 B4 .  A4 G4 | E4 .  G4 A4 B4 .  D5 B4 |
+           C5 .  B4 A4 G4 .  A4 B4 | A4 .  F#4 A4 E4 .  .  . `,
+    BASS: `E2 E2 E3 E2 E2 E2 E3 E2 | E2 E2 E3 E2 E2 E2 E3 E2 |
+           C2 C2 C3 C2 C2 C2 C3 C2 | D2 D2 D3 D2 D2 D2 D3 D2`,
+    KICK:  `x . . . x . . .`,
+    SNARE: `. . x . . . x .`,
+    HAT:   `x x x x x x x x`,
+  },
+
+  {
+    name: "Sky Runner",         // fast and sunny (C major) — feels like flying
+    BPM: 180,                   // 3 tiles per beat
+    LEAD: `G4 .  E4 G4 C5 .  G4 E4 | F4 .  A4 F4 D5 .  A4 F4 |
+           E4 G4 C5 E5 D5 .  B4 G4 | C5 .  G4 E4 C4 .  .  . `,
+    BASS: `C2 C2 C3 C2 C2 C2 C3 C2 | F2 F2 F3 F2 F2 F2 F3 F2 |
+           G2 G2 G3 G2 G2 G2 G3 G2 | C2 C2 C3 C2 G2 G2 B2 B2`,
+    KICK:  `x . . . x . . .`,
+    SNARE: `. . x . . . x .`,
+    HAT:   `x . x x x . x x`,
+  },
+
+  {
+    name: "Bounce Party",       // springy and playful (G major), lots of rests
+    BPM: 108,                   // 5 tiles per beat
+    LEAD: `G4 .  D5 .  B4 .  G4 .  | E4 .  B4 .  G4 .  E4 .  |
+           C5 .  G4 .  E4 .  C5 .  | D5 .  A4 .  F#4 . D4 . `,
+    BASS: `G2 G2 G3 G2 G2 G2 G3 G2 | E2 E2 E3 E2 E2 E2 E3 E2 |
+           C2 C2 C3 C2 C2 C2 C3 C2 | D2 D2 D3 D2 D2 D2 D3 D2`,
+    KICK:  `x . . x x . . x`,
+    SNARE: `. . x . . . x .`,
+    HAT:   `x . x . x . x .`,
+  },
+
+  {
+    name: "Boss Rush",          // dark and driving (D minor) — busy drums
+    BPM: 135,                   // 4 tiles per beat
+    LEAD: `D4 .  D4 F4 A4 .  F4 D4 | Bb3 . Bb3 D4 F4 .  D4 Bb3 |
+           C4 .  C4 E4 G4 .  E4 C4 | A3 .  C4 E4 A4 G4 F4 E4`,
+    BASS: `D2 D2 D3 D2 A2 A2 D3 D2 | Bb1 Bb1 Bb2 Bb1 F2 F2 Bb2 Bb1 |
+           C2 C2 C3 C2 G2 G2 C3 C2 | A1 A1 A2 A1 E2 E2 A2 A1`,
+    KICK:  `x . x x x . x x`,
+    SNARE: `. . x . . . x .`,
+    HAT:   `x x x x x x x x`,
+  },
+
+];
 
 /* ================================================================
    The music engine. Uses the "two clocks" trick: a slow JavaScript
@@ -42,6 +92,7 @@ const MUSIC = {
 const Music = (() => {
   let ctx = null, master = null;
   let timer = null, nextStepTime = 0, step = 0;
+  let song = SONGS[0];                            // the song playing right now
   const LOOKAHEAD_MS = 25, SCHEDULE_AHEAD = 0.12;
 
   const NOTE_INDEX = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
@@ -55,9 +106,10 @@ const Music = (() => {
   const parse = s => s.replace(/\|/g, " ").trim().split(/\s+/);
 
   let lead, bass, kick, snare, hat;
-  function compile() {
-    lead = parse(MUSIC.LEAD); bass = parse(MUSIC.BASS);
-    kick = parse(MUSIC.KICK); snare = parse(MUSIC.SNARE); hat = parse(MUSIC.HAT);
+  function compile(s) {
+    song = s;
+    lead = parse(s.LEAD); bass = parse(s.BASS);
+    kick = parse(s.KICK); snare = parse(s.SNARE); hat = parse(s.HAT);
   }
 
   function tone(f, t, dur, type, vol, decay) {
@@ -107,7 +159,7 @@ const Music = (() => {
   }
 
   function tick() {
-    const stepDur = 60 / MUSIC.BPM / 2;             // 2 steps per beat (eighths)
+    const stepDur = 60 / song.BPM / 2;              // 2 steps per beat (eighths)
     while (nextStepTime < ctx.currentTime + SCHEDULE_AHEAD) {
       playStep(step, nextStepTime, stepDur);
       nextStepTime += stepDur;
@@ -115,20 +167,37 @@ const Music = (() => {
     }
   }
 
+  // Turn a song choice (a number 0,1,2... or a name) into one of the SONGS.
+  function pickSong(which) {
+    if (typeof which === "string") {
+      const found = SONGS.find(s => s.name === which);
+      if (found) return found;
+    }
+    const n = Number(which) || 0;
+    return SONGS[((n % SONGS.length) + SONGS.length) % SONGS.length];
+  }
+
   return {
     onStep: null,   // assign a function(stepIndex) to react to the beat
-    start() {
+    // Start (or restart) a song from the very beginning. `which` is the
+    // song number or name; `volume` (0..1) is optional.
+    start(which, volume) {
       if (!MUSIC.ON) return;
       if (!ctx) {
         ctx = new (window.AudioContext || window.webkitAudioContext)();
         master = ctx.createGain(); master.connect(ctx.destination);
       }
-      master.gain.value = MUSIC.VOLUME * 0.5;
+      this.setVolume(volume === undefined ? MUSIC.VOLUME : volume);
       if (ctx.state === "suspended") ctx.resume();
-      compile();
+      compile(pickSong(which));
       this.stop();
       step = 0; nextStepTime = ctx.currentTime + 0.05;
       timer = setInterval(tick, LOOKAHEAD_MS);
+    },
+    // Change how loud the music is, even while it's playing.
+    setVolume(v) {
+      MUSIC.VOLUME = v;
+      if (master) master.gain.value = v * 0.5;
     },
     stop() { if (timer) { clearInterval(timer); timer = null; } },
   };

@@ -159,6 +159,10 @@
 
 <div class="toast" id="toast">Copied!</div>
 
+<!-- The chiptune band (MUSIC settings, the SONGS list, and the Music engine).
+     Loaded first so the game below can call Music.start() / Music.stop(). -->
+<script src="music.js"></script>
+
 <script>
 "use strict";
 
@@ -202,7 +206,10 @@ const CONFIG = {
   SCREEN_SHAKE: 10,       // how much the screen shakes when you die (0 = off)
 
   // ---------- SOUND ----------
-  SOUND: true,            // beeps and boops? true or false
+  SOUND: true,            // beeps and boops (jump, coin, death)? true or false
+  MUSIC: true,            // background music from music.js? true or false
+  MUSIC_VOLUME: 0.5,      // how loud the music is (0 = off, 1 = loud)
+  BEAT_PULSE: true,       // make the world flash gently on the beat? true or false
 };
 
 // A saved copy of the numbers above, so the "Reset to defaults"
@@ -258,7 +265,7 @@ const LEVELS = [
 `,
 },
 {
-  name: "New Level",
+  name: "Getting Better",
   level: `
 ........................................
 ........................................
