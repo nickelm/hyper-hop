@@ -31,7 +31,7 @@ export function initEditor(deps) {
 }
 
 const ED = {
-  rows: 6, cols: 40,
+  rows: CONFIG.LEVEL_ROWS, cols: 40,
   grid: [],
   tool: "#",
   cell: 34,                       // on-screen size of one editor cell
@@ -41,9 +41,20 @@ const ED = {
   author: "",                     // who made this level (asked for on the first save)
 };
 function edInit() {
+  ED.rows = CONFIG.LEVEL_ROWS;
   ED.grid = Array.from({ length: ED.rows }, () => Array(ED.cols).fill("."));
 }
 edInit();
+
+// Load a level someone made earlier into the editor. Old levels were only a few
+// rows tall, so we add empty sky on TOP until they're as tall as every level is
+// now. The bottom row always stays on the floor, so nothing you built moves.
+function edLoadGrid(parsed) {
+  ED.cols = parsed.cols;
+  ED.grid = parsed.grid.map(row => row.split(""));
+  while (ED.grid.length < CONFIG.LEVEL_ROWS) ED.grid.unshift(Array(ED.cols).fill("."));
+  ED.rows = ED.grid.length;
+}
 
 // The editor palette. Tiles are shown in groups; a { sep: true } entry leaves a
 // little gap so the new tiles read as their own family (platforms, boosts, etc.).
@@ -247,9 +258,7 @@ function importLevel(text) {
   const parsed = parseLevel(gridText);
   if (parsed.rows === 0 || parsed.cols === 0) { showToast("Couldn't read that"); return; }
 
-  ED.cols = parsed.cols;
-  ED.rows = parsed.rows;
-  ED.grid = parsed.grid.map(row => row.split(""));
+  edLoadGrid(parsed);
   if (nameMatch) {
     document.getElementById("levelNameInput").value =
       nameMatch[1].replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
@@ -320,8 +329,7 @@ document.getElementById("saveCancelBtn").onclick = () => document.getElementById
 // into the editor and show it.
 export function openLevelForEdit(L) {
   const parsed = parseLevel(L.level);
-  ED.cols = parsed.cols; ED.rows = parsed.rows;
-  ED.grid = parsed.grid.map(row => row.split(""));
+  edLoadGrid(parsed);
   ED.editingId = L.id;                              // remember WHICH level we're changing
   ED.author = L.author || "";
   ED.song = (L.song != null) ? (Number(L.song) % SONGS.length) : 0;

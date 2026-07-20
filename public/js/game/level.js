@@ -51,3 +51,11 @@ export function tileAt(level, col, row) {
 export function cellTop(level, row) {
   return -(level.rows - row) * CONFIG.TILE;
 }
+
+// The roof of the world — how high the sky goes above the floor. Every level
+// gets a tall sky (CONFIG.LEVEL_ROWS squares), even a short one, because that's
+// the room you need to fly. A level with MORE rows than that keeps its own top.
+// You only ever bump into this roof with gravity flipped, or while flying.
+export function skyTop(level) {
+  return -Math.max(level.rows, CONFIG.LEVEL_ROWS) * CONFIG.TILE;
+}

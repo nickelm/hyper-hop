@@ -14,7 +14,7 @@
 //     bridgeFades, tileCheckpoint, activatedCheckpoints, events }
 
 import { CONFIG } from "../config.js";
-import { tileAt, cellTop } from "./level.js";
+import { tileAt, cellTop, skyTop } from "./level.js";
 
 // The physics runs at a fixed 240 steps a second, no matter how fast
 // the screen draws, so the game feels exactly the same on every tablet.
@@ -63,7 +63,7 @@ export function stepPhysics(state, dt) {
       player.rot = Math.round(player.rot / 90) * 90;
     }
   } else {
-    const yCeil = cellTop(state.level, 0);            // top edge of the grid, mirroring the floor
+    const yCeil = skyTop(state.level);                // the roof of the world, mirroring the floor
     if (player.y - half <= yCeil) {
       player.y = yCeil + half; player.vy = 0; player.onGround = true;
       player.rot = Math.round(player.rot / 90) * 90;

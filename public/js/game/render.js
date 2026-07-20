@@ -11,7 +11,7 @@
 // respawn, all through that view.
 
 import { CONFIG, THEMES } from "../config.js";
-import { tileAt, cellTop } from "./level.js";
+import { tileAt, cellTop, skyTop } from "./level.js";
 import { drawPlayer } from "./player.js";
 import { drawTrail, renderParticles } from "./effects.js";
 
@@ -45,20 +45,21 @@ export function draw(view, dt) {
   // The level's theme decides the background colors. Theme 0 ("Default"), and
   // the menu, use the Control Panel colors instead.
   const theme = (S.screen === "game" && S.themeIndex) ? THEMES[S.themeIndex] : null;
-  const skyTop    = (theme && theme.SKY_TOP)    ? theme.SKY_TOP    : CONFIG.SKY_TOP;
-  const skyBottom = (theme && theme.SKY_BOTTOM) ? theme.SKY_BOTTOM : CONFIG.SKY_BOTTOM;
-  const groundColor = (theme && theme.GROUND)   ? theme.GROUND     : CONFIG.GROUND_COLOR;
+  const skyTopColor    = (theme && theme.SKY_TOP)    ? theme.SKY_TOP    : CONFIG.SKY_TOP;
+  const skyBottomColor = (theme && theme.SKY_BOTTOM) ? theme.SKY_BOTTOM : CONFIG.SKY_BOTTOM;
+  const groundColor    = (theme && theme.GROUND)     ? theme.GROUND     : CONFIG.GROUND_COLOR;
   // background
   const sky = ctx.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0, skyTop); sky.addColorStop(1, skyBottom);
+  sky.addColorStop(0, skyTopColor); sky.addColorStop(1, skyBottomColor);
   ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
 
   if (S.screen !== "game" || !S.level) return;
 
-  // camera: floor sits at 78% of screen height; player is 30% from the left
+  // camera: the floor sits at 78% of the screen height, same as always. Above it
+  // we squeeze the whole sky in, so a tall level always fits on the screen —
+  // on a big tablet or a little phone. That squeeze is the `zoom`.
   const floorY = H * 0.78;
-  const sx = wx => (wx - camX);
-  const sy = wy => (floorY + wy);
+  const zoom = floorY / -skyTop(S.level);
   let shakeX = 0, shakeY = 0;
   if (view.shake > 0.5) { shakeX = (Math.random()-0.5) * view.shake; shakeY = (Math.random()-0.5) * view.shake; view.shake *= 0.9; }
   ctx.save(); ctx.translate(shakeX, shakeY);
@@ -83,8 +84,17 @@ export function draw(view, dt) {
   ctx.fillStyle = "rgba(255,255,255,.08)";
   for (let gx = -((camX) % (T*2)); gx < W; gx += T*2) ctx.fillRect(gx, floorY + 6, T, H);
 
+  // From here on we draw the WORLD, in plain world sizes: one squeeze of the
+  // canvas and a nudge down to the floor line, and then a block really is TILE
+  // wide. (Doing it this way shrinks the outlines and letters to match too.)
+  ctx.save();
+  ctx.translate(0, floorY);
+  ctx.scale(zoom, zoom);
+  const sx = wx => (wx - camX);
+  const sy = wy => wy;
+
   // tiles
-  const colStart = Math.floor(camX / T) - 1, colEnd = Math.floor((camX + W) / T) + 1;
+  const colStart = Math.floor(camX / T) - 1, colEnd = Math.floor((camX + W / zoom) / T) + 1;
   for (let col = colStart; col <= colEnd; col++) {
     for (let row = 0; row < S.level.rows; row++) {
       const ch = tileAt(S.level, col, row);
@@ -177,7 +187,7 @@ export function draw(view, dt) {
         ctx.closePath(); ctx.fill();
       } else if (ch === ">" || ch === "<") {
         // a full-height shimmering gate filling this column. Green = faster, blue = slower.
-        const topY = sy(cellTop(S.level, 0)), botY = sy(0), gh = botY - topY;
+        const topY = sy(skyTop(S.level)), botY = sy(0), gh = botY - topY;
         const color = ch === ">" ? "#3dff7a" : "#3aa0ff";
         ctx.save();
         ctx.globalAlpha = 0.22; ctx.fillStyle = color; ctx.fillRect(x, topY, T, gh);
@@ -197,7 +207,7 @@ export function draw(view, dt) {
       } else if (ch === "u" || ch === "n") {
         // a full-height gravity gate. Purple ( u ) flips gravity up, cyan ( n )
         // sets it back to normal. The arrow shows which way DOWN becomes.
-        const topY = sy(cellTop(S.level, 0)), botY = sy(0), gh = botY - topY;
+        const topY = sy(skyTop(S.level)), botY = sy(0), gh = botY - topY;
         const color = ch === "u" ? "#b06bff" : "#3ff0ff";
         ctx.save();
         ctx.globalAlpha = 0.22; ctx.fillStyle = color; ctx.fillRect(x, topY, T, gh);
@@ -270,7 +280,8 @@ export function draw(view, dt) {
 
   // particles (the death explosion) — each piece carries its own style/color
   renderParticles(ctx, sx, sy, dt, particles, gravityDir);
-  ctx.restore();
+  ctx.restore();   // done with the world (the zoom)
+  ctx.restore();   // done with the screen shake — the HUD below is never shaken or zoomed
 
   // progress bar + coins
   const prog = view.levelProgress();

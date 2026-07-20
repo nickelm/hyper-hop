@@ -37,6 +37,8 @@ export const CONFIG = {
   SLOW_MULT: 0.75,        // a  <  gate makes it this many times normal speed (less than 1 = slower)
 
   // ---------- SIZES ----------
+  LEVEL_ROWS: 14,         // how many squares tall the sky is. 14 fills a tablet screen nicely.
+                          // Bigger = more room to fly, but everything looks smaller
   TILE: 40,               // size of one grid square. Everything is built from these
   PLAYER_SIZE: 34,        // how big the cube is (should be a bit smaller than TILE)
   SPIKE_MERCY: 0.35,      // how forgiving spikes are (0 = brutal, 0.5 = very kind)
