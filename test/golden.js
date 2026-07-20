@@ -38,6 +38,8 @@ function newState(hh, fixture) {
     camX: camX,
     speedMult: 1,
     gravityDir: 1,
+    flying: false,        // a cube, not a rocket (an  f  gate turns this on)
+    holding: false,       // no finger down yet (the hold script below drives this)
     coinsGot: new Set(),
     trail: [],
     bridgeFades: {},
@@ -52,9 +54,13 @@ function newState(hh, fixture) {
 function traceFor(hh, fixture) {
   const state = newState(hh, fixture);
   const jumpSteps = new Set(fixture.jumpAt || []);
+  // The hold script: pairs of [fromStep, toStep] where a finger is held down.
+  // Tapping is what a cube needs; HOLDING is what a rocket needs.
+  const holdRanges = fixture.holdAt || [];
   const samples = [];
   for (let step = 0; step <= STEPS; step++) {
     if (jumpSteps.has(step)) hh.requestJump(state);
+    state.holding = holdRanges.some(r => step >= r[0] && step < r[1]);
     if (step % SAMPLE_EVERY === 0) {
       const p = state.player;
       samples.push({

@@ -13,7 +13,7 @@
 // The ONE list of tiles a level is allowed to use. Everything that
 // checks or describes level tiles reads from this, so there is a
 // single source of truth.
-const LEVEL_CHARS = new Set([".", "#", "^", "o", "*", "|", "/", "\\", "=", "-", "p", "U", "s", "@", ">", "<", "u", "n"]);
+const LEVEL_CHARS = new Set([".", "#", "^", "o", "*", "|", "/", "\\", "=", "-", "p", "U", "s", "@", ">", "<", "u", "n", "f", "c"]);
 const LEVEL_CHARS_HELP = [...LEVEL_CHARS].join(" ");   // "‎. # ^ o * | / \ = - ..." for error messages
 const MAX_COLS = 500;
 const MAX_ROWS = 30;
@@ -45,7 +45,8 @@ const MAX_NAME = 20;                 // a player name is 1–20 letters
 // (This must stay in sync with the CONFIG block in public/index.html.)
 const KNOWN_SETTING_KEYS = new Set([
   "SCROLL_SPEED", "GRAVITY", "JUMP_POWER", "PAD_POWER", "SPIN_SPEED",
-  "TILE", "PLAYER_SIZE", "SPIKE_MERCY",
+  "FLY_THRUST", "FLY_MAX_SPEED", "FLY_TILT",
+  "LEVEL_ROWS", "TILE", "PLAYER_SIZE", "SPIKE_MERCY",
   "PLAYER_COLOR", "PLAYER_EYE_COLOR", "BLOCK_COLOR", "BLOCK_EDGE",
   "SPIKE_COLOR", "PAD_COLOR", "COIN_COLOR", "GROUND_COLOR",
   "SKY_TOP", "SKY_BOTTOM",

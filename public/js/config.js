@@ -36,6 +36,12 @@ export const CONFIG = {
   FAST_MULT: 1.5,         // a  >  gate makes the world scroll this many times normal speed
   SLOW_MULT: 0.75,        // a  <  gate makes it this many times normal speed (less than 1 = slower)
 
+  // ---------- FLYING (between an  f  gate and a  c  gate) ----------
+  FLY_THRUST: 3200,       // how hard holding the button pushes you up while flying.
+                          // Less than GRAVITY (5000) and you can never climb!
+  FLY_MAX_SPEED: 600,     // the fastest you can climb or dive while flying (pixels per second)
+  FLY_TILT: 30,           // how far the cube tips its nose while flying (degrees). 0 = always flat
+
   // ---------- SIZES ----------
   LEVEL_ROWS: 14,         // how many squares tall the sky is. 14 fills a tablet screen nicely.
                           // Bigger = more room to fly, but everything looks smaller

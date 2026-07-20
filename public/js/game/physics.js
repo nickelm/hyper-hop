@@ -10,8 +10,14 @@
 // loop to act on, so the physics stays the same on every device.
 //
 // The `state` it works on looks like:
-//   { player, camX, speedMult, gravityDir, level, coinsGot, trail,
-//     bridgeFades, tileCheckpoint, activatedCheckpoints, events }
+//   { player, camX, speedMult, gravityDir, flying, holding, level,
+//     coinsGot, trail, bridgeFades, tileCheckpoint,
+//     activatedCheckpoints, events }
+//
+// `flying` is false for a normal cube and true between an  f  gate and a
+// c  gate, when the cube becomes a little rocket. `holding` is simply
+// "is a finger (or the space bar) held down right now?" — that's what
+// makes a flying cube climb.
 
 import { CONFIG } from "../config.js";
 import { tileAt, cellTop, skyTop } from "./level.js";
@@ -29,7 +35,18 @@ export function stepPhysics(state, dt) {
   const prevX = player.x;                    // remember where we were, for portal crossings
   player.x += CONFIG.SCROLL_SPEED * state.speedMult * dt;
   state.camX += CONFIG.SCROLL_SPEED * state.speedMult * dt;
-  player.vy += CONFIG.GRAVITY * state.gravityDir * dt;   // gravityDir flips which way "down" pulls
+  if (state.flying) {
+    // Rocket mode: hold the button and you push toward whichever way is UP right
+    // now; let go and you just fall. Multiplying the whole push by gravityDir is
+    // what makes a  u  gate flip your rocket too, with no extra code.
+    const push = state.holding ? -CONFIG.FLY_THRUST : CONFIG.GRAVITY;
+    player.vy += push * state.gravityDir * dt;
+    // A rocket can only climb or dive so fast.
+    if (player.vy >  CONFIG.FLY_MAX_SPEED) player.vy =  CONFIG.FLY_MAX_SPEED;
+    if (player.vy < -CONFIG.FLY_MAX_SPEED) player.vy = -CONFIG.FLY_MAX_SPEED;
+  } else {
+    player.vy += CONFIG.GRAVITY * state.gravityDir * dt; // gravityDir flips which way "down" pulls
+  }
   player.y += player.vy * dt;
 
   // ---- portals: gates that fill a whole column and fire when the cube's CENTER
@@ -37,33 +54,47 @@ export function stepPhysics(state, dt) {
   // world up, a  <  slows it down — absolute, not stacking (the newest one wins).
   {
     const colA = Math.floor(prevX / T) - 1, colB = Math.floor(player.x / T) + 1;
-    for (let c = colA; c <= colB; c++) {
-      const mid = c * T + T / 2;
+    for (let col = colA; col <= colB; col++) {
+      const mid = col * T + T / 2;
       if (prevX < mid && player.x >= mid) {   // just crossed this column's midline
-        const p = portalInColumn(state, c);
+        const p = portalInColumn(state, col);
         if (p === ">") state.speedMult = CONFIG.FAST_MULT;
         else if (p === "<") state.speedMult = CONFIG.SLOW_MULT;
-        const g = gravityPortalInColumn(state, c);   // u = flip gravity, n = back to normal (absolute)
+        const g = gravityPortalInColumn(state, col);  // u = flip gravity, n = back to normal (absolute)
         if (g === "u") state.gravityDir = -1;
         else if (g === "n") state.gravityDir = 1;
+        const f = flightPortalInColumn(state, col);   // f = fly like a rocket, c = back to a cube
+        if (f === "f") state.flying = true;
+        else if (f === "c") state.flying = false;
       }
     }
   }
 
-  // spin in the air, snap when landed
-  if (!player.onGround) player.rot += CONFIG.SPIN_SPEED * dt;
+  // spin in the air, snap when landed — but a flying cube doesn't spin at all:
+  // it tips its nose toward wherever it's heading, like a little plane.
+  if (state.flying) {
+    const tip = (player.vy / CONFIG.FLY_MAX_SPEED) * CONFIG.FLY_TILT;
+    player.rot = Math.max(-CONFIG.FLY_TILT, Math.min(CONFIG.FLY_TILT, tip));
+  } else if (!player.onGround) {
+    player.rot += CONFIG.SPIN_SPEED * dt;
+  }
 
   player.onGround = false;
 
+  const yCeil = skyTop(state.level);                  // the roof of the world, mirroring the floor
   // The ground you land on depends on gravity: normally the implicit floor at
-  // the bottom (y = 0); flipped, the implicit ceiling at the top of the grid.
-  if (state.gravityDir > 0) {
+  // the bottom (y = 0); flipped, the roof of the world. While FLYING both of
+  // them are soft walls instead: you slide along them and stop, you never die,
+  // and you never "land" (so tapping can't turn into a jump).
+  if (state.flying) {
+    if (player.y + half >= 0)     { player.y = -half;        if (player.vy > 0) player.vy = 0; }
+    if (player.y - half <= yCeil) { player.y = yCeil + half;  if (player.vy < 0) player.vy = 0; }
+  } else if (state.gravityDir > 0) {
     if (player.y + half >= 0) {
       player.y = -half; player.vy = 0; player.onGround = true;
       player.rot = Math.round(player.rot / 90) * 90;
     }
   } else {
-    const yCeil = skyTop(state.level);                // the roof of the world, mirroring the floor
     if (player.y - half <= yCeil) {
       player.y = yCeil + half; player.vy = 0; player.onGround = true;
       player.rot = Math.round(player.rot / 90) * 90;
@@ -79,9 +110,9 @@ export function stepPhysics(state, dt) {
   const wasOnRampUp = player.onRamp === 1;   // remember, so we can launch off the top of a /
   player.onRamp = 0;
   const jumping = player.vy < 0;             // going up (a jump or pad) always beats the ramp glue
-  // Ramps are ignored while gravity is flipped (they simply do nothing, and still
-  // never kill) — see the note in CLAUDE.md.
-  for (let col = c0; state.gravityDir > 0 && col <= c1; col++) {
+  // Ramps are ignored while gravity is flipped, and while flying (they simply do
+  // nothing, and still never kill) — see the note in CLAUDE.md.
+  for (let col = c0; !state.flying && state.gravityDir > 0 && col <= c1; col++) {
     for (let row = 0; row < state.level.rows; row++) {
       const ch = tileAt(state.level, col, row);
       if (ch !== "/" && ch !== "\\") continue;
@@ -114,7 +145,11 @@ export function stepPhysics(state, dt) {
 
       if (ch === "#") {
         if (!overlapX || !overlapY) continue;
-        if (state.gravityDir > 0) {
+        if (state.flying) {
+          // Flying, a block is just something to steer around: touching one at
+          // all is the end of the run. You can't land on top of it in a rocket.
+          if (!player.onRamp) die(state);
+        } else if (state.gravityDir > 0) {
           // normal: land on the TOP if we were above it last step and falling down
           const prevBottom = player.y + half - player.vy * dt;
           if (player.vy >= 0 && prevBottom <= ty + 6) {
@@ -153,6 +188,8 @@ export function stepPhysics(state, dt) {
       } else if (ch === "o" || ch === "p" || ch === "U") {
         // pads and catapults: launch you toward whichever way is UP right now.
         // You reach into the pad from the side gravity is pulling you.
+        // They do nothing at all while flying — they're made for feet.
+        if (state.flying) continue;
         const power = ch === "o" ? CONFIG.PAD_POWER : ch === "p" ? CONFIG.SMALL_PAD_POWER : CONFIG.CATAPULT_POWER;
         const reached = state.gravityDir > 0 ? (player.y + half > ty + T * 0.4)
                                              : (player.y - half < ty + T * 0.6);
@@ -170,8 +207,9 @@ export function stepPhysics(state, dt) {
         if (player.x + half > tx) win(state);
       } else if (ch === "=" || ch === "-") {
         // Jump-through platform: land on it only from the side gravity pulls you,
-        // and pass right through it the other way. It never kills.
-        if (overlapX) {
+        // and pass right through it the other way. It never kills. While flying
+        // you sail straight through it — a rocket doesn't land on things.
+        if (overlapX && !state.flying) {
           if (state.gravityDir > 0) {                   // normal: land on the top
             const prevBottom = player.y + half - player.vy * dt;
             if (player.vy >= 0 && prevBottom <= ty + 6) {
@@ -199,7 +237,7 @@ export function stepPhysics(state, dt) {
   // Ran off the TOP of a  /  into open air? Give a little upward pop.
   // (We check this AFTER the tile pass so walking straight onto a block or the
   // floor — where onGround is now true — does NOT pop you. 0 = disabled.)
-  if (wasOnRampUp && !player.onGround && player.vy >= 0) {
+  if (!state.flying && wasOnRampUp && !player.onGround && player.vy >= 0) {
     player.vy = -CONFIG.RAMP_LAUNCH * CONFIG.SCROLL_SPEED;
   }
 
@@ -218,6 +256,7 @@ export function stepPhysics(state, dt) {
 export function requestJump(state) {
   const player = state.player;
   if (player.dead || player.won) return false;
+  if (state.flying) return false;   // flying, HOLDING the button is what lifts you — not a tap
   if (player.onGround) {
     player.vy = -CONFIG.JUMP_POWER * state.gravityDir;
     player.onGround = false;
@@ -263,6 +302,16 @@ function gravityPortalInColumn(state, col) {
   return null;
 }
 
+// Same idea once more:  f  turns you into a rocket,  c  turns you back into a cube.
+function flightPortalInColumn(state, col) {
+  if (col < 0 || col >= state.level.cols) return null;
+  for (let row = 0; row < state.level.rows; row++) {
+    const ch = state.level.grid[row][col];
+    if (ch === "f" || ch === "c") return ch;
+  }
+  return null;
+}
+
 // Touching a  @  quietly saves where you are (position, speed, and gravity)
 // as your new respawn point, and lights up that flag.
 function dropTileCheckpoint(state, col, row) {
@@ -272,7 +321,8 @@ function dropTileCheckpoint(state, col, row) {
     onGround: player.onGround, camX: state.camX,
     coins: new Set(state.coinsGot),    // the coins you'd grabbed by this point
     speedMult: state.speedMult,        // how fast you were going
-    gravityDir: state.gravityDir,      // and which way gravity was pointing
+    gravityDir: state.gravityDir,      // which way gravity was pointing
+    flying: state.flying,              // and whether you were a rocket or a cube
   };
   state.activatedCheckpoints.add(col + "," + row);   // this flag now shows up lit
 }

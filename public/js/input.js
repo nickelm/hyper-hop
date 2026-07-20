@@ -9,36 +9,43 @@
 // of things to call (jump, leaveGame, ...) when initInput() runs.
 
 export function initInput(deps) {
-  const { S, getPlayer, jump, afterWin, leaveGame,
+  const { S, getPlayer, jump, setHolding, afterWin, leaveGame,
           dropCheckpoint, removeCheckpoint, openPanel, closePanel, isPanelOpen } = deps;
 
-  // Is a finger (or the space bar) being held down right now?
+  // Is a finger (or the space bar) being held down right now? The game needs to
+  // know too — that's what makes a flying cube climb — so every time this
+  // changes we tell it with setHolding.
   let holding = false;
+  function setHold(v) { holding = v; setHolding(v); }
 
   function pressDown(e) {
     if (e.target.closest("button") || e.target.closest("#editorScreen") || e.target.closest("#skinScreen") ||
         e.target.closest("#exportBox") ||
         e.target.closest("#importBox") || e.target.closest("#saveBox") || e.target.closest("#pinBox") ||
         e.target.closest("#confirmBox") || e.target.closest("#controlPanel")) return;
-    holding = true;
+    setHold(true);
     if (S.screen === "game") {
       const player = getPlayer();
       if (player && player.won) { afterWin(); return; }
       jump();
     }
   }
-  function pressUp() { holding = false; }
+  function pressUp() { setHold(false); }
   window.addEventListener("pointerdown", pressDown);
   window.addEventListener("pointerup", pressUp);
+  // A finger sliding off the screen, or switching apps mid-hold, must also let
+  // go — otherwise a rocket would keep thrusting all by itself.
+  window.addEventListener("pointercancel", pressUp);
+  window.addEventListener("blur", pressUp);
   window.addEventListener("keydown", e => {
     if (e.code === "Space" || e.code === "ArrowUp") {
       const player = getPlayer();
       if (player && player.won) { afterWin(); return; }
       if (!holding) jump();
-      holding = true;
+      setHold(true);
     }
   });
-  window.addEventListener("keyup", () => holding = false);
+  window.addEventListener("keyup", () => setHold(false));
   // hold-to-keep-jumping, like the real game
   setInterval(() => {
     const player = getPlayer();
