@@ -39,6 +39,7 @@ export function draw(view, dt) {
   const coinsGot = view.coinsGot, trail = view.trail, particles = view.particles;
   const checkpoints = view.checkpoints, activatedCheckpoints = view.activatedCheckpoints, bridgeFades = view.bridgeFades;
   const totalCoins = view.totalCoins, attempts = view.attempts, runPercent = view.runPercent, runWasBest = view.runWasBest;
+  const tileCheckpoint = view.tileCheckpoint;
   const S = view.S;
   const T = CONFIG.TILE;
   // The level's theme decides the background colors. Theme 0 ("Default"), and
