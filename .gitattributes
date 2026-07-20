@@ -1,0 +1,5 @@
+# Golden physics traces must stay byte-identical on every computer, so keep
+# them as LF (no Windows CRLF conversion). The harness writes them with "\n";
+# this makes sure git checks them out that way too, so --check never fails
+# just because of line endings.
+test/golden/*.json text eol=lf

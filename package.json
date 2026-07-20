@@ -5,7 +5,8 @@
   "license": "MIT",
   "author": "Niklas Elmqvist",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node test/golden.js --check"
   },
   "dependencies": {
     "express": "^4.19.2"
