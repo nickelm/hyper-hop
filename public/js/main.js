@@ -23,6 +23,8 @@ import { hslToHex, normalizeSkin, drawPlayer } from "./game/player.js";
 import { drawTrail, spawnExplosion, renderParticles } from "./game/effects.js";
 import { draw } from "./game/render.js";
 import { Music, SONGS, MUSIC } from "./music.js";
+import { apiGet, apiWrite, apiPost, askConfirm } from "./api.js";
+import { initInput } from "./input.js";
 
 
 /* ================================================================
@@ -347,49 +349,16 @@ function frame(t) {
 requestAnimationFrame(frame);
 
 // ---------------- Input ----------------
-let holding = false;
-function pressDown(e) {
-  if (e.target.closest("button") || e.target.closest("#editorScreen") || e.target.closest("#skinScreen") ||
-      e.target.closest("#exportBox") ||
-      e.target.closest("#importBox") || e.target.closest("#saveBox") || e.target.closest("#pinBox") ||
-      e.target.closest("#confirmBox") || e.target.closest("#controlPanel")) return;
-  holding = true;
-  if (S.screen === "game") {
-    if (player && player.won) { afterWin(); return; }
-    jump();
-  }
-}
-function pressUp() { holding = false; }
-window.addEventListener("pointerdown", pressDown);
-window.addEventListener("pointerup", pressUp);
-window.addEventListener("keydown", e => {
-  if (e.code === "Space" || e.code === "ArrowUp") {
-    if (player && player.won) { afterWin(); return; }
-    if (!holding) jump();
-    holding = true;
-  }
+// All the tapping and key-pressing lives in js/input.js. We hand it the
+// handful of things it needs to call, so it never has to know how the
+// game works inside.
+initInput({
+  S,
+  getPlayer: () => player,
+  jump, afterWin, leaveGame,
+  dropCheckpoint, removeCheckpoint,
+  openPanel, closePanel, isPanelOpen,
 });
-window.addEventListener("keyup", () => holding = false);
-// hold-to-keep-jumping, like the real game
-setInterval(() => { if (holding && S.screen === "game" && !S.paused && player && player.onGround) jump(); }, 40);
-
-// Extra keys: Escape = back (or close the panel), Z = drop checkpoint, X = remove.
-window.addEventListener("keydown", e => {
-  if (e.code === "Escape") {
-    if (isPanelOpen()) closePanel();
-    else if (S.screen === "game") leaveGame();
-  } else if (S.screen === "game" && S.practice && !S.paused) {
-    if (e.code === "KeyZ") dropCheckpoint();
-    else if (e.code === "KeyX") removeCheckpoint();
-  }
-});
-
-// In-game buttons
-document.getElementById("backBtn").onclick = leaveGame;
-document.getElementById("gearBtn").onclick = openPanel;
-document.getElementById("menuGearBtn").onclick = openPanel;
-document.getElementById("dropCpBtn").onclick = dropCheckpoint;
-document.getElementById("removeCpBtn").onclick = removeCheckpoint;
 
 // Leave a level and go back where you came from: the editor if you were
 // play-testing, otherwise the main menu. Used by the Menu button, Escape,
@@ -447,24 +416,12 @@ function showScreen(id) {
    server (server.js) when it starts. Everything the game asks for
    goes through these helpers. */
 
-// Where the API lives. We work this out from the page's own address so
-// the game runs the same whether it's at the top of the site, in a
-// subfolder, or on a custom port — no editing needed.
-const API_BASE = new URL(".", document.baseURI).pathname + "api";
-
 // The levels we downloaded from the server (the editor's Edit buttons use this).
 let serverLevels = [];
 
 // Everyone's high scores (each player's best % on each level). Downloaded at
 // start and kept fresh as new scores come in.
 let serverScores = [];
-
-// Ask the server for something and get back the answer as data.
-async function apiGet(path) {
-  const res = await fetch(API_BASE + path);
-  if (!res.ok) throw new Error("Server said " + res.status);
-  return res.json();
-}
 
 // Copy the server's saved settings ON TOP OF our CONFIG defaults, so a
 // change saved "for everyone" shows up for every player. DEFAULTS was
@@ -487,75 +444,6 @@ function setPlayerName(name) {
   playerName = (name || "").trim().slice(0, 40);
   try { localStorage.setItem("hh_player", playerName); } catch (e) {}
   updateNameBtn();
-}
-
-// The family PIN, remembered ONLY for this visit (never saved to the device,
-// on purpose — see CLAUDE.md). We ask for it the first time you save.
-let familyPin = null;
-
-// Show the PIN pop-up and wait for the kid to type it. Resolves to the PIN,
-// or null if they tapped Cancel.
-function askPin(message) {
-  return new Promise(resolve => {
-    const box = document.getElementById("pinBox");
-    const input = document.getElementById("pinInput");
-    const okBtn = document.getElementById("pinOkBtn");
-    const cancelBtn = document.getElementById("pinCancelBtn");
-    document.getElementById("pinMsg").textContent = message || "Type the family PIN to save:";
-    input.value = "";
-    box.classList.remove("hidden");
-    setTimeout(() => input.focus(), 50);
-    function done(val) {
-      box.classList.add("hidden");
-      okBtn.onclick = cancelBtn.onclick = input.onkeydown = null;
-      resolve(val);
-    }
-    okBtn.onclick = () => done(input.value.trim() || null);
-    cancelBtn.onclick = () => done(null);
-    input.onkeydown = e => { if (e.key === "Enter") done(input.value.trim() || null); };
-  });
-}
-
-// Show an "are you sure?" pop-up and wait for the answer. Resolves to true
-// (Yes) or false (Cancel).
-function askConfirm(message) {
-  return new Promise(resolve => {
-    const box = document.getElementById("confirmBox");
-    const yesBtn = document.getElementById("confirmYesBtn");
-    const noBtn = document.getElementById("confirmNoBtn");
-    document.getElementById("confirmMsg").textContent = message || "Are you sure?";
-    box.classList.remove("hidden");
-    function done(val) {
-      box.classList.add("hidden");
-      yesBtn.onclick = noBtn.onclick = null;
-      resolve(val);
-    }
-    yesBtn.onclick = () => done(true);
-    noBtn.onclick = () => done(false);
-  });
-}
-
-// Send a change to the server with the family PIN attached. If the PIN is
-// wrong the server says 401, so we forget it and ask again once.
-async function apiWrite(method, path, body) {
-  async function send() {
-    const res = await fetch(API_BASE + path, {
-      method,
-      headers: { "Content-Type": "application/json", "X-Family-Pin": familyPin },
-      body: body != null ? JSON.stringify(body) : undefined,
-    });
-    const data = await res.json().catch(() => ({}));
-    return { res, data };
-  }
-  if (!familyPin) { familyPin = await askPin(); if (!familyPin) throw new Error("cancelled"); }
-  let { res, data } = await send();
-  if (res.status === 401) {
-    familyPin = await askPin("That PIN was wrong. Try again:");
-    if (!familyPin) throw new Error("cancelled");
-    ({ res, data } = await send());
-  }
-  if (!res.ok) throw new Error(data.error || ("Server said " + res.status));
-  return data;
 }
 
 /* ================================================================
@@ -585,14 +473,9 @@ async function submitScore(percent) {
   runWasBest = true;
   try {
     // A plain POST with NO family PIN — saving a score is open on purpose.
-    const res = await fetch(API_BASE + "/scores", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ levelId: S.levelId, player: playerName, percent }),
-    });
-    if (!res.ok) return;
-    const board = await res.json();               // this level's fresh leaderboard
-    // Fold it back into our copy so menus/overlays show the new numbers.
+    const board = await apiPost("/scores", { levelId: S.levelId, player: playerName, percent });
+    // That's this level's fresh leaderboard. Fold it back into our copy so
+    // menus/overlays show the new numbers.
     serverScores = serverScores.filter(s => Number(s.levelId) !== Number(S.levelId)).concat(board);
     if (S.screen === "menu") buildMenu(serverLevels);
   } catch (e) { /* a lost score is no big deal — just keep playing */ }
