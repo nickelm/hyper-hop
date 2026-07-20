@@ -1,17 +1,19 @@
 // ============================================================
 // routes/scores.js — everyone's best % on each level.
 // ============================================================
-// Saving a score is the ONE change that does NOT need the family
-// PIN: kids beat their best all the time, and asking for the PIN
-// every run would be no fun. It's still frozen by READ_ONLY.
-// Mounted at /api/scores.
+// You have to be logged in (we save the score under YOUR name, so we
+// need to know who you are), but there's no extra permission to
+// check: playing and beating your best is what the game is for.
+// Still frozen by READ_ONLY. Mounted at /api/scores.
 
 "use strict";
 
 const express = require("express");
-const { LEVELS_FILE, SCORES_FILE, readJson, writeJsonWithBackup } = require("../lib/storage");
+const {
+  LEVELS_FILE, SCORES_FILE, readJson, updateJson, SKIP_SAVE,
+} = require("../lib/storage");
 const { validateScore } = require("../lib/validate");
-const { notFrozen } = require("../lib/auth");
+const { guard } = require("../lib/auth");
 
 const router = express.Router();
 
@@ -20,31 +22,40 @@ router.get("/", (req, res) => {
   res.json(readJson(SCORES_FILE));
 });
 
-// Save a score — no family PIN needed (but still frozen by READ_ONLY).
-router.post("/", notFrozen, (req, res) => {
+// Save a score.
+router.post("/", guard, (req, res) => {
   const levels = readJson(LEVELS_FILE);
+  // The score always belongs to whoever is logged in — a tablet
+  // doesn't get to say "this one's for somebody else".
   let clean;
-  try { clean = validateScore(req.body, levels); }
+  try { clean = validateScore({ ...req.body, player: req.account.name }, levels); }
   catch (e) { return res.status(400).json({ error: e.message }); }
 
-  const scores = readJson(SCORES_FILE);
-  // One row per (level, player). Only write when this beats their old best.
-  const row = scores.find(s => Number(s.levelId) === clean.levelId && s.player === clean.player);
-  if (!row) {
-    scores.push({ ...clean, updatedAt: new Date().toISOString() });
-    writeJsonWithBackup(SCORES_FILE, scores);
-  } else if (clean.percent > row.percent) {
-    row.percent = clean.percent;
-    row.updatedAt = new Date().toISOString();
-    writeJsonWithBackup(SCORES_FILE, scores);
-  }
+  const accountId = req.account.id;
+
+  updateJson(SCORES_FILE, scores => {
+    // One row per (level, player). We look you up by your id, and fall
+    // back to your name for old rows saved before players had ids.
+    const row = scores.find(s => Number(s.levelId) === clean.levelId &&
+      (s.accountId != null ? Number(s.accountId) === Number(accountId) : s.player === clean.player));
+
+    if (!row) {
+      scores.push({ ...clean, accountId, updatedAt: new Date().toISOString() });
+    } else if (clean.percent > row.percent) {
+      row.percent = clean.percent;
+      row.accountId = accountId;         // tidy up an old name-only row
+      row.player = clean.player;
+      row.updatedAt = new Date().toISOString();
+    } else {
+      return SKIP_SAVE;                  // not an improvement — nothing to save
+    }
+  });
 
   // Send back just this level's leaderboard, best first, so the tablet can
   // update what it shows without re-fetching everything.
-  const board = scores
+  res.json(readJson(SCORES_FILE)
     .filter(s => Number(s.levelId) === clean.levelId)
-    .sort((a, b) => b.percent - a.percent);
-  res.json(board);
+    .sort((a, b) => b.percent - a.percent));
 });
 
 module.exports = router;

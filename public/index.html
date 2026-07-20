@@ -49,8 +49,8 @@
   .tileBtn.selected { border-color: #7dff5e; background: #2a4a2a; }
   .tileSep { width: 14px; }   /* a little gap between groups of tiles in the palette */
 
-  /* "Who's playing?" — the row of player cubes on the menu */
-  #profileRow { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+  /* "Who's playing?" — the row of player cubes on the login screen */
+  #profileRow, #accountRow { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
     align-items: flex-end; max-width: 680px; margin-bottom: 4px; }
   .profileBtn { display: flex; flex-direction: column; align-items: center; gap: 4px;
     background: #1e1e40; border: 3px solid #555a8a; border-radius: 14px;
@@ -60,6 +60,29 @@
   .profileBtn canvas { width: 56px; height: 56px; }
   .profileBtn.add { justify-content: center; font-size: 15px; color: #9fb0ff; }
   .profileBtn .pName { max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* "tap to claim" under a name nobody has picked a password for yet */
+  .profileBtn .pHint { font-size: 11px; font-weight: normal; color: #ffe14d; }
+
+  /* The menu's top bar: your cube, your purse, the trophy board, log out */
+  #menuBar { display: flex; gap: 10px; align-items: center; justify-content: center;
+    flex-wrap: wrap; margin-bottom: 6px; }
+  #whoAmI { display: flex; gap: 8px; align-items: center; color: #fff;
+    font-weight: bold; font-size: 17px; background: #1e1e40; border: 3px solid #555a8a;
+    border-radius: 14px; padding: 6px 12px; }
+  #whoAmI canvas { width: 40px; height: 40px; }
+  #coinBalance { color: #ffd700; font-weight: bold; font-size: 18px; }
+  /* The 🏆 trophy board: who has earned the most coins ever */
+  #boardList { display: flex; flex-direction: column; gap: 6px; max-height: 55vh; overflow-y: auto; }
+  .boardRow { display: flex; align-items: center; gap: 10px; color: #fff; font-weight: bold;
+    background: #1e1e40; border-radius: 10px; padding: 6px 12px; font-size: 17px;
+    border: 3px solid transparent; }
+  .boardRow canvas { width: 36px; height: 36px; flex: none; }
+  .boardRow .bName { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .boardRow .bCoins { color: #ffd700; }
+  .boardRow.me { background: #2a4a2a; }
+  .boardRow.medal1 { border-color: #ffd700; }   /* gold   */
+  .boardRow.medal2 { border-color: #c0c8d8; }   /* silver */
+  .boardRow.medal3 { border-color: #cd7f32; }   /* bronze */
 
   /* The cube editor: rows of choices under a live preview */
   #skinScreen { gap: 10px; padding: 12px; overflow: auto; justify-content: flex-start; }
@@ -88,11 +111,12 @@
   #exportText, #importText { flex: 1; width: 100%; background: #05051a; color: #7dff5e; border: none;
     font-family: monospace; font-size: 14px; padding: 10px; white-space: pre; resize: none;
     -webkit-user-select: text; user-select: text; }
-  /* Small centered pop-ups: the "Save to server" box and the family-PIN box. */
-  #saveBox, #pinBox, #confirmBox, #nameBox, #scoresBox { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  /* Small centered pop-ups: "Save to server", the password box, and friends.
+     Every new pop-up must be added to this list, or it won't be centered. */
+  #saveBox, #passwordBox, #confirmBox, #nameBox, #scoresBox, #boardBox { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
     width: min(90vw, 380px); background: #10102a; border: 4px solid #3ec6ff; border-radius: 16px;
     padding: 20px; display: flex; flex-direction: column; gap: 12px; z-index: 30; }
-  #saveBox label, #pinBox label { color: #fff; font-weight: bold; }
+  #saveBox label, #passwordBox label { color: #fff; font-weight: bold; }
   /* The grey score line under each level's Play button. */
   .levelScore { font-size: 13px; font-weight: normal; color: rgba(255,255,255,.7); margin-top: 3px; }
   /* The 📊 high-scores list. */
@@ -159,11 +183,29 @@
   <button class="btn pink small" id="removeCpBtn">&#9873;&minus; Remove</button>
 </div>
 
+<!-- ======================= LOGIN ======================= -->
+<!-- The first screen: tap your cube, type your password. -->
+<div id="loginScreen" class="screen">
+  <h1>HYPER HOP</h1>
+  <div style="color:#fff;font-weight:bold;font-size:20px">Who's playing?</div>
+  <div id="accountRow"></div>
+</div>
+
 <!-- ======================= MENU ======================= -->
-<div id="menuScreen" class="screen">
+<div id="menuScreen" class="screen hidden">
   <button class="btn small" id="menuGearBtn" style="position:absolute;top:12px;right:12px">&#9881; Settings</button>
   <h1>HYPER HOP</h1>
-  <div id="profileRow"></div>
+  <!-- Your cube, your purse, the trophy board, and the way out. -->
+  <div id="menuBar">
+    <div id="whoAmI">
+      <canvas id="myCube" width="40" height="40"></canvas>
+      <span id="myName"></span>
+      <span id="coinBalance"></span>
+    </div>
+    <button class="btn small" id="editCubeBtn">&#9998; My cube</button>
+    <button class="btn small" id="trophyBtn">&#127942; Trophies</button>
+    <button class="btn pink small" id="logoutBtn">Log out</button>
+  </div>
   <button class="btn green" id="playAllBtn">&#9654; Play All</button>
   <div class="levelList" id="levelList"></div>
   <label class="practiceRow"><input type="checkbox" id="practiceChk"> Practice mode (checkpoints)</label>
@@ -216,6 +258,8 @@
   </div>
   <div id="skinPreviewWrap">
     <canvas id="skinPreview" width="260" height="150"></canvas>
+    <!-- What this cube costs: only the parts you actually changed. -->
+    <div id="skinPrice" style="color:#ffe14d;font-size:13px;font-weight:bold;text-align:center"></div>
     <button class="btn small" id="skinDeathBtn">&#128128; Try it out</button>
   </div>
   <div class="skinControls" id="skinControls"></div>
@@ -251,13 +295,13 @@
   </div>
 </div>
 
-<!-- Family-PIN pop-up: shown the first time you save in a session. -->
-<div id="pinBox" class="hidden">
-  <div id="pinMsg" style="color:#fff;font-weight:bold;font-size:18px">Type the family PIN to save:</div>
-  <input id="pinInput" class="modalInput" type="password" inputmode="numeric" autocomplete="off">
+<!-- Password pop-up: shown when you tap your name on the login screen. -->
+<div id="passwordBox" class="hidden">
+  <div id="passwordMsg" style="color:#fff;font-weight:bold;font-size:18px">What's your password?</div>
+  <input id="passwordInput" class="modalInput" type="password" autocomplete="off">
   <div style="display:flex;gap:8px;justify-content:center">
-    <button class="btn green small" id="pinOkBtn">OK</button>
-    <button class="btn small" id="pinCancelBtn">Cancel</button>
+    <button class="btn green small" id="passwordOkBtn">Log in</button>
+    <button class="btn small" id="passwordCancelBtn">Cancel</button>
   </div>
 </div>
 
@@ -270,14 +314,24 @@
   </div>
 </div>
 
-<!-- Who's-playing pop-up: this tablet remembers the name for next time. -->
+<!-- Name pop-up: making a brand-new player. -->
 <div id="nameBox" class="hidden">
-  <div style="color:#fff;font-weight:bold;font-size:18px">&#128100; Who's playing on this tablet?</div>
-  <input id="nameInput" class="modalInput" maxlength="40" placeholder="Your name" autocomplete="off">
-  <div class="warn" style="color:#ffe14d;font-size:13px">We remember this on your tablet for your high scores.</div>
+  <div id="nameMsg" style="color:#fff;font-weight:bold;font-size:18px">&#128100; What should we call you?</div>
+  <input id="nameInput" class="modalInput" maxlength="20" placeholder="Your name" autocomplete="off">
+  <div class="warn" style="color:#ffe14d;font-size:13px">Up to 20 letters. Everyone will see this name.</div>
   <div style="display:flex;gap:8px;justify-content:center">
     <button class="btn green small" id="nameOkBtn">OK</button>
     <button class="btn small" id="nameCancelBtn">Cancel</button>
+  </div>
+</div>
+
+<!-- Trophy board: who has earned the most coins EVER (not who has the
+     most left — spending must never cost you your place). -->
+<div id="boardBox" class="hidden">
+  <div style="color:#fff;font-weight:bold;font-size:20px;text-align:center">&#127942; Coins earned ever</div>
+  <div id="boardList"></div>
+  <div style="display:flex;gap:8px;justify-content:center">
+    <button class="btn green small" id="boardCloseBtn">Close</button>
   </div>
 </div>
 
