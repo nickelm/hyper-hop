@@ -309,54 +309,9 @@ import {
 } from "./js/config.js";
 import { parseLevel, tileAt, cellTop } from "./js/game/level.js";
 import { FIXED_DT, stepPhysics, requestJump } from "./js/game/physics.js";
+import { hslToHex, normalizeSkin, drawPlayer } from "./js/game/player.js";
+import { drawTrail, spawnExplosion, renderParticles } from "./js/game/effects.js";
 
-// Turn a rainbow-slider hue (0–360) into a "#rrggbb" color. We keep the
-// color bright and punchy (fixed saturation + lightness) so every hue looks
-// good on a cube. Returns 6 hex digits, which is exactly what the server wants.
-function hslToHex(hue) {
-  const s = 0.85, l = 0.55;
-  const c = (1 - Math.abs(2 * l - 1)) * s;
-  const hp = ((hue % 360) + 360) % 360 / 60;
-  const x = c * (1 - Math.abs((hp % 2) - 1));
-  let r = 0, g = 0, b = 0;
-  if (hp < 1) { r = c; g = x; }
-  else if (hp < 2) { r = x; g = c; }
-  else if (hp < 3) { g = c; b = x; }
-  else if (hp < 4) { g = x; b = c; }
-  else if (hp < 5) { r = x; b = c; }
-  else { r = c; b = x; }
-  const m = l - c / 2;
-  const hex = v => Math.round((v + m) * 255).toString(16).padStart(2, "0");
-  return "#" + hex(r) + hex(g) + hex(b);
-}
-
-// Take whatever skin we were handed (from the server, an old save, or a
-// half-built one in the editor) and return a complete, safe skin. This NEVER
-// throws — every bad or missing part is replaced by the default. Because we
-// call it everywhere a skin is used, a broken skin can never crash the game.
-function normalizeSkin(raw) {
-  const s = (raw && typeof raw === "object") ? raw : {};
-  const isColor = v => typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v);
-  const pick = (v, list, def) => list.includes(v) ? v : def;
-  // Keep only the FIRST emoji someone typed (a whole emoji, even a fancy one).
-  let emoji = DEFAULT_SKIN.emoji;
-  if (typeof s.emoji === "string" && s.emoji.trim()) {
-    const first = (typeof Intl !== "undefined" && Intl.Segmenter)
-      ? [...new Intl.Segmenter().segment(s.emoji.trim())][0].segment
-      : [...s.emoji.trim()][0];
-    if (first) emoji = first;
-  }
-  return {
-    bodyColor:    isColor(s.bodyColor)    ? s.bodyColor    : DEFAULT_SKIN.bodyColor,
-    outlineColor: isColor(s.outlineColor) ? s.outlineColor : DEFAULT_SKIN.outlineColor,
-    faceColor:    isColor(s.faceColor)    ? s.faceColor    : DEFAULT_SKIN.faceColor,
-    shape:     pick(s.shape,     SHAPES,           DEFAULT_SKIN.shape),
-    face:      pick(s.face,      FACES,            DEFAULT_SKIN.face),
-    emoji,
-    trail:     pick(s.trail,     TRAIL_STYLES,     DEFAULT_SKIN.trail),
-    explosion: pick(s.explosion, EXPLOSION_STYLES, DEFAULT_SKIN.explosion),
-  };
-}
 
 /* ================================================================
    ====================  THE LEVELS  ===============================
@@ -635,196 +590,6 @@ function activeSkin() {
   return normalizeSkin({ bodyColor: CONFIG.PLAYER_COLOR, faceColor: CONFIG.PLAYER_EYE_COLOR });
 }
 
-// Draw just the cube's OUTLINE SHAPE at the origin (already moved + rotated),
-// then fill and stroke it. hs is half the cube's size.
-function drawShape(ctx, shape, hs) {
-  ctx.beginPath();
-  if (shape === "circle") {
-    ctx.arc(0, 0, hs, 0, Math.PI * 2);
-  } else if (shape === "diamond") {
-    ctx.moveTo(0, -hs); ctx.lineTo(hs, 0); ctx.lineTo(0, hs); ctx.lineTo(-hs, 0);
-    ctx.closePath();
-  } else if (shape === "hex") {
-    for (let i = 0; i < 6; i++) {
-      const a = Math.PI / 180 * (60 * i - 30);
-      const x = Math.cos(a) * hs, y = Math.sin(a) * hs;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-  } else if (shape === "rounded") {
-    const r = hs * 0.4;
-    if (ctx.roundRect) { ctx.roundRect(-hs, -hs, hs * 2, hs * 2, r); }
-    else {               // older browsers: build the rounded box by hand
-      ctx.moveTo(-hs + r, -hs);
-      ctx.arcTo(hs, -hs, hs, hs, r); ctx.arcTo(hs, hs, -hs, hs, r);
-      ctx.arcTo(-hs, hs, -hs, -hs, r); ctx.arcTo(-hs, -hs, hs, -hs, r);
-      ctx.closePath();
-    }
-  } else {               // "square" — the classic cube
-    ctx.rect(-hs, -hs, hs * 2, hs * 2);
-  }
-  ctx.fill();
-  ctx.stroke();
-}
-
-// Draw the cube's FACE at the origin (already moved + rotated). Faces are
-// simple little shapes; "emoji" writes one emoji big in the middle.
-function drawFace(ctx, skin, hs) {
-  if (skin.face === "none") return;
-  ctx.fillStyle = skin.faceColor;
-  const lE = -hs * 0.45, rE = hs * 0.13, eyeW = hs * 0.32, eyeH = hs * 0.5, eyeY = -hs * 0.4;
-
-  if (skin.face === "emoji") {
-    ctx.font = (hs * 1.6) + "px serif";
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(skin.emoji, 0, hs * 0.08);
-    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";   // put it back for other text
-    return;
-  }
-  if (skin.face === "happy") {          // the classic face: two eyes + a mouth
-    ctx.fillRect(lE, eyeY, eyeW, eyeH);
-    ctx.fillRect(rE, eyeY, eyeW, eyeH);
-    ctx.fillRect(-hs * 0.35, hs * 0.25, hs * 0.7, hs * 0.18);
-    return;
-  }
-  if (skin.face === "cool") {           // sunglasses bar + a little smile
-    ctx.fillRect(-hs * 0.55, -hs * 0.25, hs * 1.1, hs * 0.28);
-    ctx.fillRect(-hs * 0.3, hs * 0.32, hs * 0.6, hs * 0.12);
-    return;
-  }
-  if (skin.face === "angry") {          // slanted brows + eyes + a frown
-    ctx.fillRect(lE, eyeY + hs * 0.12, eyeW, eyeH * 0.7);
-    ctx.fillRect(rE, eyeY + hs * 0.12, eyeW, eyeH * 0.7);
-    ctx.save();
-    ctx.rotate(0.35); ctx.fillRect(-hs * 0.5, -hs * 0.5, hs * 0.4, hs * 0.1); ctx.restore();
-    ctx.save();
-    ctx.rotate(-0.35); ctx.fillRect(hs * 0.1, -hs * 0.5, hs * 0.4, hs * 0.1); ctx.restore();
-    ctx.fillRect(-hs * 0.3, hs * 0.42, hs * 0.6, hs * 0.12);
-    return;
-  }
-  if (skin.face === "silly") {          // eyes + a tongue sticking out
-    ctx.fillRect(lE, eyeY, eyeW, eyeH);
-    ctx.fillRect(rE, eyeY, eyeW, eyeH);
-    ctx.fillRect(-hs * 0.35, hs * 0.2, hs * 0.7, hs * 0.12);
-    ctx.fillStyle = "#ff5ec6";          // a pink tongue, always cheerful
-    ctx.fillRect(-hs * 0.1, hs * 0.28, hs * 0.2, hs * 0.28);
-    return;
-  }
-  if (skin.face === "sleepy") {         // two closed-eye lines + a tiny mouth
-    ctx.fillRect(lE, 0, eyeW, hs * 0.12);
-    ctx.fillRect(rE, 0, eyeW, hs * 0.12);
-    ctx.fillRect(-hs * 0.12, hs * 0.35, hs * 0.24, hs * 0.1);
-    return;
-  }
-  if (skin.face === "robot") {          // rectangular eyes + an antenna on top
-    ctx.fillRect(lE, eyeY, eyeW, eyeH * 0.7);
-    ctx.fillRect(rE, eyeY, eyeW, eyeH * 0.7);
-    ctx.fillRect(-hs * 0.3, hs * 0.3, hs * 0.6, hs * 0.1);
-    ctx.fillRect(-hs * 0.04, -hs * 1.25, hs * 0.08, hs * 0.35);  // antenna wire
-    ctx.beginPath(); ctx.arc(0, -hs * 1.3, hs * 0.12, 0, Math.PI * 2); ctx.fill(); // antenna dot
-    return;
-  }
-}
-
-// Draw the whole cube with a skin. Used by the game, the cube-editor preview,
-// and the little cubes on the player buttons.
-//
-// COLLISION NOTE: the cube's hitbox is ALWAYS a CONFIG.PLAYER_SIZE square, no
-// matter what shape/size we draw here. Skins are LOOKS ONLY — they never change
-// where you can stand, what kills you, or how hard the level is. (the physics
-// in js/game/physics.js only ever uses CONFIG.PLAYER_SIZE for the hitbox —
-// never the drawn shape.)
-function drawPlayer(ctx, x, y, rot, skin, size) {
-  const s = normalizeSkin(skin);
-  const hs = (size || CONFIG.PLAYER_SIZE) / 2;
-  ctx.save();
-  ctx.translate(x, y); ctx.rotate(rot * Math.PI / 180);
-  ctx.fillStyle = s.bodyColor;
-  ctx.strokeStyle = s.outlineColor; ctx.lineWidth = 3;
-  drawShape(ctx, s.shape, hs);
-  drawFace(ctx, s, hs);
-  ctx.restore();
-}
-
-// Draw the glowing trail behind the cube, in whatever style the skin picked.
-// It takes the trail array so the editor preview can pass its own. CONFIG.TRAIL
-// is still the master on/off switch, exactly like before.
-function drawTrail(ctx, sx, sy, skin, dt, trailArr, dead) {
-  if (!CONFIG.TRAIL || skin.trail === "off" || dead) return;
-  let i = 0;
-  for (const t of trailArr) {
-    t.life -= dt * 1.6;
-    if (t.life <= 0) { i++; continue; }
-    const x = sx(t.x), y = sy(t.y), k = CONFIG.PLAYER_SIZE * t.life * 0.7;
-    if (skin.trail === "bubbles") {
-      ctx.globalAlpha = t.life * 0.4; ctx.fillStyle = skin.bodyColor;
-      ctx.beginPath(); ctx.arc(x, y, k * 0.5, 0, Math.PI * 2); ctx.fill();
-    } else if (skin.trail === "rainbow") {
-      ctx.globalAlpha = t.life * 0.5;
-      ctx.fillStyle = "hsl(" + ((i * 30) % 360) + ",90%,60%)";
-      ctx.fillRect(x - k / 2, y - k / 2, k, k);
-    } else {              // "fade" — the classic trail, in the cube's own color
-      ctx.globalAlpha = t.life * 0.35; ctx.fillStyle = skin.bodyColor;
-      ctx.fillRect(x - k / 2, y - k / 2, k, k);
-    }
-    i++;
-  }
-  ctx.globalAlpha = 1;
-}
-
-// Make the cube explode into pieces. Each piece remembers the style + color +
-// emoji so the look can't change halfway through. Count stays CONFIG.PARTICLES_ON_DEATH.
-// Takes the particle array so the editor preview can pass its own.
-function spawnExplosion(x, y, skin, partArr) {
-  for (let i = 0; i < CONFIG.PARTICLES_ON_DEATH; i++) {
-    const a = Math.random() * Math.PI * 2, sp = 150 + Math.random() * 450;
-    partArr.push({
-      x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 200, life: 1,
-      rot: Math.random() * Math.PI * 2, vr: (Math.random() - 0.5) * 12,
-      style: skin.explosion, color: skin.bodyColor, emoji: skin.emoji,
-      hue: (i * 47) % 360,
-    });
-  }
-}
-
-// Draw one small star (5 points) at the origin. Used by the "stars" explosion.
-function drawStar(ctx, r) {
-  ctx.beginPath();
-  for (let i = 0; i < 10; i++) {
-    const rr = (i % 2 === 0) ? r : r * 0.45;
-    const a = Math.PI / 180 * (36 * i - 90);
-    const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  }
-  ctx.closePath(); ctx.fill();
-}
-
-// Move and draw the explosion pieces, in whatever style each piece remembers.
-// Takes the particle array so the editor preview can pass its own.
-function renderParticles(ctx, sx, sy, dt, partArr) {
-  for (const p of partArr) {
-    p.life -= dt * 1.2; if (p.life <= 0) continue;
-    p.vy += CONFIG.GRAVITY * 0.4 * gravityDir * dt; p.x += p.vx * dt; p.y += p.vy * dt;  // pieces fall the way gravity points
-    if (p.vr) p.rot += p.vr * dt;
-    ctx.globalAlpha = p.life;
-    const x = sx(p.x), y = sy(p.y), style = p.style || "squares";
-    if (style === "emoji") {
-      ctx.font = "16px serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(p.emoji || "😀", x, y);
-      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-    } else if (style === "stars") {
-      ctx.save(); ctx.translate(x, y); ctx.rotate(p.rot || 0);
-      ctx.fillStyle = p.color || CONFIG.PLAYER_COLOR; drawStar(ctx, 8); ctx.restore();
-    } else if (style === "confetti") {
-      ctx.save(); ctx.translate(x, y); ctx.rotate(p.rot || 0);
-      ctx.fillStyle = "hsl(" + (p.hue || 0) + ",90%,60%)"; ctx.fillRect(-5, -3, 10, 6); ctx.restore();
-    } else {             // "squares" — the classic 8×8 pieces
-      ctx.fillStyle = p.color || CONFIG.PLAYER_COLOR;
-      ctx.fillRect(x - 4, y - 4, 8, 8);
-    }
-  }
-  ctx.globalAlpha = 1;
-}
 
 function draw(dt) {
   const T = CONFIG.TILE;
@@ -1055,7 +820,7 @@ function draw(dt) {
   }
 
   // particles (the death explosion) — each piece carries its own style/color
-  renderParticles(ctx, sx, sy, dt, particles);
+  renderParticles(ctx, sx, sy, dt, particles, gravityDir);
   ctx.restore();
 
   // progress bar + coins
@@ -1738,7 +1503,7 @@ function skinPreviewFrame(ts) {
   const skin = normalizeSkin(SK.skin);
   drawTrail(c, id, id, skin, dt, PV.trail, PV.dead);
   if (!PV.dead) drawPlayer(c, PV.x, PV.y, PV.rot, skin);
-  renderParticles(c, id, id, dt, PV.particles);
+  renderParticles(c, id, id, dt, PV.particles, gravityDir);
 }
 
 // The "Try it out" button: blow the cube up so you can see the explosion, then
