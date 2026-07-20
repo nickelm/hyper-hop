@@ -44,13 +44,31 @@ function makeStub() {
   return stub;
 }
 
-// Pull the inline <script> (the one with no src=) out of index.html.
+// Turn an ES-module source file into plain script text: drop its `import`
+// lines and its `export ` keywords, so we can glue several modules together
+// and run them as one classic script inside the vm.
+function toClassic(src) {
+  return src
+    .replace(/import\s+[\s\S]*?from\s*["'][^"']+["']\s*;/g, "")   // drop `import ... from "...";`
+    .replace(/^(\s*)export\s+/gm, "$1");                          // drop the `export ` keyword
+}
+
+// Build the engine source the harness runs. The game is being split into ES
+// modules one piece at a time; we stitch the already-extracted modules back
+// together with the still-inline code from index.html so the whole engine
+// runs as it does in the browser. (Stage 3 will let us import the pure
+// physics module directly and retire this stitching.)
 function readEngineSource() {
-  const htmlPath = path.join(__dirname, "..", "..", "public", "index.html");
-  const html = fs.readFileSync(htmlPath, "utf8");
-  const match = html.match(/<script>\r?\n([\s\S]*?)<\/script>/);
-  if (!match) throw new Error("Could not find the inline <script> block in public/index.html");
-  return match[1];
+  const pub = path.join(__dirname, "..", "..", "public");
+  const config = fs.readFileSync(path.join(pub, "js", "config.js"), "utf8");
+  const level = fs.readFileSync(path.join(pub, "js", "game", "level.js"), "utf8");
+
+  const html = fs.readFileSync(path.join(pub, "index.html"), "utf8");
+  const match = html.match(/<script type="module">\r?\n([\s\S]*?)<\/script>/);
+  if (!match) throw new Error("Could not find the main module <script> in public/index.html");
+
+  // config first (level uses CONFIG), then level, then the inline code.
+  return toClassic(config) + "\n" + toClassic(level) + "\n" + toClassic(match[1]);
 }
 
 // Build a fresh, fully-loaded engine and return its controls.
