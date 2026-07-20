@@ -218,6 +218,26 @@ export function draw(view, dt) {
         ctx.fillText(ch === "u" ? "↑" : "↓", x + T/2, topY + gh/2 + 8);
         ctx.textAlign = "left";
         ctx.restore();
+      } else if (ch === "f" || ch === "c") {
+        // a full-height flight gate. Orange ( f ) turns you into a rocket you
+        // steer by HOLDING the button; green ( c ) turns you back into a cube.
+        const topY = sy(skyTop(S.level)), botY = sy(0), gh = botY - topY;
+        const color = ch === "f" ? "#ff9a3d" : "#7dff5e";
+        ctx.save();
+        ctx.globalAlpha = 0.22; ctx.fillStyle = color; ctx.fillRect(x, topY, T, gh);
+        ctx.globalAlpha = 0.9;                          // bright edges
+        ctx.fillRect(x, topY, 3, gh); ctx.fillRect(x + T - 3, topY, 3, gh);
+        ctx.globalAlpha = 0.5;              // shimmer lines, drifting UP like a rocket
+        const t3 = performance.now() / 400;
+        for (let k = 0; k < 3; k++) {
+          const yy = botY - (((t3 + k / 3) % 1) * gh);
+          ctx.fillRect(x + 4, yy, T - 8, 3);
+        }
+        ctx.globalAlpha = 1; ctx.fillStyle = "#fff";    // wings = fly ;  square = back to a cube
+        ctx.font = "bold 22px Trebuchet MS"; ctx.textAlign = "center";
+        ctx.fillText(ch === "f" ? "✈" : "■", x + T/2, topY + gh/2 + 8);
+        ctx.textAlign = "left";
+        ctx.restore();
       } else if (ch === "=" || ch === "-") {
         // A thin slab across the top third of the tile (that's the part you land on).
         const th = T / 3;
