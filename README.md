@@ -80,11 +80,15 @@ all players. **Reset for everyone** puts them back to the defaults.
 
 ## Tweaking the game
 
-Open `public/index.html` and look at the `CONFIG` block near the top. Every gameplay
-number is there with a kid-friendly comment — gravity, jump power, cube size,
-colors, sound, screen shake, and more. Change a number, refresh the page, and see
-what happens. (These are the *defaults*; the server's saved settings are layered on
-top at startup.)
+Open `public/js/config.js` — that one file is the game's control panel. Every
+gameplay number is there with a kid-friendly comment — gravity, jump power, cube
+size, colors, sound, screen shake, and more. Change a number, refresh the page, and
+see what happens. (These are the *defaults*; the server's saved settings are layered
+on top at startup.)
+
+The rest of the game is split into small files under `public/js/`, one job each —
+`game/physics.js` is the rules of the world, `game/render.js` draws it, `ui/editor.js`
+is the level editor, and so on. See CLAUDE.md for the full map.
 
 ## Deploying
 

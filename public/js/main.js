@@ -9,20 +9,14 @@
 
 "use strict";
 
-// The control panel (all the tunable numbers) and the cube-skin option
-// lists now live in js/config.js. The level format, its parser, and the
-// tile lookups live in js/game/level.js. We import what we need from them.
-import {
-  CONFIG, DEFAULTS, THEMES,
-  SHAPES, FACES, TRAIL_STYLES, EXPLOSION_STYLES,
-  DEFAULT_SKIN, SKIN_BODY_COLORS, SKIN_OUTLINE_COLORS, SKIN_FACE_COLORS,
-} from "./config.js";
-import { parseLevel, tileAt, cellTop } from "./game/level.js";
+// Each module owns one job; we import just the bits we use here.
+import { CONFIG, DEFAULT_SKIN } from "./config.js";
+import { parseLevel } from "./game/level.js";
 import { FIXED_DT, stepPhysics, requestJump } from "./game/physics.js";
-import { hslToHex, normalizeSkin, drawPlayer } from "./game/player.js";
-import { drawTrail, spawnExplosion, renderParticles } from "./game/effects.js";
+import { normalizeSkin, drawPlayer } from "./game/player.js";
+import { spawnExplosion } from "./game/effects.js";
 import { draw } from "./game/render.js";
-import { Music, SONGS, MUSIC } from "./music.js";
+import { Music, SONGS } from "./music.js";
 import { apiGet, apiWrite, apiPost, askConfirm } from "./api.js";
 import { initInput } from "./input.js";
 import { showToast } from "./ui/toast.js";

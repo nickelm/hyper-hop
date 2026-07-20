@@ -6,7 +6,7 @@
   "author": "Niklas Elmqvist",
   "scripts": {
     "start": "node server/server.js",
-    "test": "node test/golden.js --check"
+    "test": "node test/golden.js --check && node test/boot.js"
   },
   "dependencies": {
     "express": "^4.19.2"
