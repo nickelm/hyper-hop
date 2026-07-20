@@ -11,7 +11,7 @@
 // respawn, all through that view.
 
 import { CONFIG, THEMES } from "../config.js";
-import { tileAt, cellTop, skyTop } from "./level.js";
+import { tileAt, cellTop, skyTop, groundSpans } from "./level.js";
 import { drawPlayer } from "./player.js";
 import { drawTrail, renderParticles } from "./effects.js";
 
@@ -80,14 +80,6 @@ export function draw(view, dt) {
     ctx.fillRect(px, py, 3, 3);
   }
 
-  // ground
-  ctx.fillStyle = groundColor; ctx.fillRect(0, floorY, W, H - floorY);
-  // the bright line on top of the floor thickens and glows a touch on the beat
-  ctx.fillStyle = "rgba(255,255,255," + (0.6 + view.beatPulse * 0.4) + ")";
-  ctx.fillRect(0, floorY, W, 3 + view.beatPulse * 3);
-  ctx.fillStyle = "rgba(255,255,255,.08)";
-  for (let gx = -((camX) % (T*2)); gx < W; gx += T*2) ctx.fillRect(gx, floorY + 6, T, H);
-
   // From here on we draw the WORLD, in plain world sizes: one squeeze of the
   // canvas and a nudge down to the floor line, and then a block really is TILE
   // wide. (Doing it this way shrinks the outlines and letters to match too.)
@@ -97,8 +89,39 @@ export function draw(view, dt) {
   const sx = wx => (wx - camX);
   const sy = wy => wy;
 
-  // tiles
   const colStart = Math.floor(camX / T) - 1, colEnd = Math.floor((camX + W / zoom) / T) + 1;
+
+  /* ---- the ground ----
+     Drawn column by column, because an  h  gate can switch it off and leave a
+     hole with nothing but sky underneath. We draw it in RUNS of neighbouring
+     columns rather than one rectangle per tile, so there are no seams. */
+  const groundOn = groundSpans(S.level);
+  const groundOnCol = (col) => {
+    if (S.level.cols === 0) return true;
+    if (col < 0) return true;                       // the run-up before the level starts
+    if (col >= S.level.cols) return groundOn[S.level.cols - 1];   // and on past the end
+    return groundOn[col];
+  };
+  const groundDepth = (H - floorY) / zoom;          // how far down to fill, in world sizes
+  const drawGroundRun = (from, to) => {             // columns [from, to)
+    const x = sx(from * T), w = (to - from) * T;
+    ctx.fillStyle = groundColor; ctx.fillRect(x, 0, w, groundDepth);
+    // the bright line on top of the floor thickens and glows a touch on the beat
+    ctx.fillStyle = "rgba(255,255,255," + (0.6 + view.beatPulse * 0.4) + ")";
+    ctx.fillRect(x, 0, w, 3 + view.beatPulse * 3);
+    ctx.fillStyle = "rgba(255,255,255,.08)";        // the darker stripes, every other column
+    for (let col = from; col < to; col++) {
+      if ((((col % 2) + 2) % 2) === 0) ctx.fillRect(sx(col * T), 6, T, groundDepth);
+    }
+  };
+  let runFrom = null;
+  for (let col = colStart; col <= colEnd + 1; col++) {
+    const on = (col <= colEnd) && groundOnCol(col);
+    if (on && runFrom === null) runFrom = col;
+    else if (!on && runFrom !== null) { drawGroundRun(runFrom, col); runFrom = null; }
+  }
+
+  // tiles
   for (let col = colStart; col <= colEnd; col++) {
     for (let row = 0; row < S.level.rows; row++) {
       const ch = tileAt(S.level, col, row);
@@ -245,6 +268,20 @@ export function draw(view, dt) {
         ctx.globalAlpha = 1; ctx.fillStyle = "#fff";    // wings = fly ;  square = back to a cube
         ctx.font = "bold 22px Trebuchet MS"; ctx.textAlign = "center";
         ctx.fillText(ch === "f" ? "✈" : "■", x + T/2, topY + gh/2 + 8);
+        ctx.textAlign = "left";
+        ctx.restore();
+      } else if (ch === "h" || ch === "g") {
+        // a full-height ground gate. Grey ( h ) takes the ground away and leaves
+        // a hole to fall through; gold ( g ) puts the ground back.
+        const topY = sy(skyTop(S.level)), botY = sy(0), gh = botY - topY;
+        const color = ch === "h" ? "#7b839e" : "#c9a227";
+        ctx.save();
+        ctx.globalAlpha = 0.22; ctx.fillStyle = color; ctx.fillRect(x, topY, T, gh);
+        ctx.globalAlpha = 0.9;                          // bright edges
+        ctx.fillRect(x, topY, 3, gh); ctx.fillRect(x + T - 3, topY, 3, gh);
+        ctx.globalAlpha = 1; ctx.fillStyle = "#fff";    // ✕ = no ground ;  ▬ = ground again
+        ctx.font = "bold 22px Trebuchet MS"; ctx.textAlign = "center";
+        ctx.fillText(ch === "h" ? "✕" : "▬", x + T/2, topY + gh/2 + 8);
         ctx.textAlign = "left";
         ctx.restore();
       } else if (ch === "=" || ch === "-") {

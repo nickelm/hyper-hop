@@ -24,6 +24,7 @@ import { CONFIG } from "../config.js";
      >  speed up      <  slow down    (speed gates)
      u  flip gravity  n  gravity back (gravity gates)
      f  fly (rocket)  c  cube again   (flight gates)
+     h  hole (ground off)  g  ground back on   (ground gates)
 
    The floor is implicit: the bottom row sits on an automatic ground
    plane. All rows in a level must be the same length. The SKY, though,
@@ -61,4 +62,32 @@ export function cellTop(level, row) {
 // You only ever bump into this roof with gravity flipped, or while flying.
 export function skyTop(level) {
   return -Math.max(level.rows, CONFIG.LEVEL_ROWS) * CONFIG.TILE;
+}
+
+/* ----------------------------------------------------------------
+   WHERE IS THE GROUND SWITCHED ON? An  h  gate opens a hole (no
+   ground at all from there on) and a  g  gate builds it back. The
+   physics works this out as you run past the gates; the DRAWING
+   needs to know it for every column at once, so it can leave the
+   ground out where the hole is. Same rule either way: whichever
+   gate you passed most recently wins, and a level starts with the
+   ground on.
+
+   Worked out once per level and remembered, because draw() asks for
+   it on every single frame.
+   ---------------------------------------------------------------- */
+export function groundSpans(level) {
+  if (level.groundOnByColumn) return level.groundOnByColumn;
+  const on = new Array(level.cols);
+  let isOn = true;
+  for (let col = 0; col < level.cols; col++) {
+    for (let row = 0; row < level.rows; row++) {
+      const ch = level.grid[row][col];
+      if (ch === "h") { isOn = false; break; }
+      if (ch === "g") { isOn = true; break; }
+    }
+    on[col] = isOn;
+  }
+  level.groundOnByColumn = on;
+  return on;
 }

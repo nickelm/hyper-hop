@@ -10,8 +10,8 @@
 // loop to act on, so the physics stays the same on every device.
 //
 // The `state` it works on looks like:
-//   { player, camX, speedMult, gravityDir, flying, holding, level,
-//     coinsGot, trail, bridgeFades, tileCheckpoint,
+//   { player, camX, speedMult, gravityDir, flying, holding, groundOn,
+//     level, coinsGot, trail, bridgeFades, tileCheckpoint,
 //     activatedCheckpoints, events }
 //
 // `flying` is false for a normal cube and true between an  f  gate and a
@@ -66,6 +66,9 @@ export function stepPhysics(state, dt) {
         const f = flightPortalInColumn(state, col);   // f = fly like a rocket, c = back to a cube
         if (f === "f") state.flying = true;
         else if (f === "c") state.flying = false;
+        const gr = groundPortalInColumn(state, col);  // h = open a hole, g = ground back (absolute)
+        if (gr === "h") state.groundOn = false;
+        else if (gr === "g") state.groundOn = true;
       }
     }
   }
@@ -82,23 +85,37 @@ export function stepPhysics(state, dt) {
   player.onGround = false;
 
   const yCeil = skyTop(state.level);                  // the roof of the world, mirroring the floor
-  // The ground you land on depends on gravity: normally the implicit floor at
-  // the bottom (y = 0); flipped, the roof of the world. While FLYING both of
-  // them are soft walls instead: you slide along them and stop, you never die,
-  // and you never "land" (so tapping can't turn into a jump).
+  // The GROUND is whichever surface gravity pulls you onto: normally the floor
+  // at the bottom (y = 0), upside-down the roof at the top. An  h  gate switches
+  // that ground OFF — a hole with nothing to stand on — and a  g  gate builds it
+  // back. The other side of the world was never ground; it only stops you while
+  // you're flying, so a rocket can't shoot out of the top of the level.
+  const groundIsFloor = state.gravityDir > 0;
+  const floorSolid = state.groundOn || !groundIsFloor;  // the floor is "ground" only when gravity is normal
+  const roofSolid  = state.groundOn ||  groundIsFloor;  // upside-down, the roof is the ground instead
+
+  // While FLYING both surfaces are soft walls: you slide along them and stop,
+  // you never die on them, and you never "land" (so tapping can't become a jump).
   if (state.flying) {
-    if (player.y + half >= 0)     { player.y = -half;        if (player.vy > 0) player.vy = 0; }
-    if (player.y - half <= yCeil) { player.y = yCeil + half;  if (player.vy < 0) player.vy = 0; }
-  } else if (state.gravityDir > 0) {
-    if (player.y + half >= 0) {
+    if (floorSolid && player.y + half >= 0)     { player.y = -half;       if (player.vy > 0) player.vy = 0; }
+    if (roofSolid  && player.y - half <= yCeil) { player.y = yCeil + half; if (player.vy < 0) player.vy = 0; }
+  } else if (groundIsFloor) {
+    if (floorSolid && player.y + half >= 0) {
       player.y = -half; player.vy = 0; player.onGround = true;
       player.rot = Math.round(player.rot / 90) * 90;
     }
   } else {
-    if (player.y - half <= yCeil) {
+    if (roofSolid && player.y - half <= yCeil) {
       player.y = yCeil + half; player.vy = 0; player.onGround = true;
       player.rot = Math.round(player.rot / 90) * 90;
     }
+  }
+
+  // Nothing under you at all? Once you've dropped right past where the ground
+  // would have been, you've fallen out of the world — and that's the end.
+  if (!state.groundOn) {
+    const fellOut = groundIsFloor ? (player.y - half > 0) : (player.y + half < yCeil);
+    if (fellOut) die(state);
   }
 
   // columns near the player (used by both the ramp pass and the tile pass)
@@ -312,6 +329,16 @@ function flightPortalInColumn(state, col) {
   return null;
 }
 
+// And once more for the ground gates:  h  opens a hole,  g  fills it back in.
+function groundPortalInColumn(state, col) {
+  if (col < 0 || col >= state.level.cols) return null;
+  for (let row = 0; row < state.level.rows; row++) {
+    const ch = state.level.grid[row][col];
+    if (ch === "h" || ch === "g") return ch;
+  }
+  return null;
+}
+
 // Touching a  @  quietly saves where you are (position, speed, and gravity)
 // as your new respawn point, and lights up that flag.
 function dropTileCheckpoint(state, col, row) {
@@ -322,7 +349,8 @@ function dropTileCheckpoint(state, col, row) {
     coins: new Set(state.coinsGot),    // the coins you'd grabbed by this point
     speedMult: state.speedMult,        // how fast you were going
     gravityDir: state.gravityDir,      // which way gravity was pointing
-    flying: state.flying,              // and whether you were a rocket or a cube
+    flying: state.flying,              // whether you were a rocket or a cube
+    groundOn: state.groundOn,          // and whether there was any ground under you
   };
   state.activatedCheckpoints.add(col + "," + row);   // this flag now shows up lit
 }

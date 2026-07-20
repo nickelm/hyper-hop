@@ -40,6 +40,7 @@ function newState(hh, fixture) {
     gravityDir: 1,
     flying: false,        // a cube, not a rocket (an  f  gate turns this on)
     holding: false,       // no finger down yet (the hold script below drives this)
+    groundOn: true,       // there is ground to stand on (an  h  gate opens a hole)
     coinsGot: new Set(),
     trail: [],
     bridgeFades: {},

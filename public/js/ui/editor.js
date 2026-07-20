@@ -84,6 +84,8 @@ const TOOLS = [
   { ch: "n", icon: "\u2193", label: "normal gravity" }, // \u2193 = fall down again
   { ch: "f", icon: "\u2708", label: "fly portal" },   // \u2708 wings = become a rocket (HOLD to climb)
   { ch: "c", icon: "\u25a0", label: "cube portal" },  // \u25a0 square = back to a normal cube
+  { ch: "h", icon: "\u2715", label: "hole (ground off)" }, // \u2715 = no ground, you fall out!
+  { ch: "g", icon: "\u25ac", label: "ground back on" },    // \u25ac = solid ground again
   { sep: true },                                      // ---- checkpoint ----
   { ch: "@", icon: "\u2691", label: "checkpoint" },  // \u2691 flag = checkpoint
 ];
@@ -193,6 +195,12 @@ function drawEditor() {
       eCtx.globalAlpha = 0.5; eCtx.fillRect(x+2, y+2, c-4, c-4); eCtx.globalAlpha = 1;
       eCtx.fillStyle = "#fff"; eCtx.font = "bold 18px Trebuchet MS"; eCtx.textAlign = "center";
       eCtx.fillText(ch === "u" ? "↑" : "↓", x+c/2, y+c/2+6); eCtx.textAlign = "left";
+    }
+    else if (ch === "h" || ch === "g") {   // a ground gate (grey hole / gold ground)
+      eCtx.fillStyle = ch === "h" ? "#7b839e" : "#c9a227";
+      eCtx.globalAlpha = 0.5; eCtx.fillRect(x+2, y+2, c-4, c-4); eCtx.globalAlpha = 1;
+      eCtx.fillStyle = "#fff"; eCtx.font = "bold 18px Trebuchet MS"; eCtx.textAlign = "center";
+      eCtx.fillText(ch === "h" ? "✕" : "▬", x+c/2, y+c/2+6); eCtx.textAlign = "left";
     }
     else if (ch === "f" || ch === "c") {   // a flight portal (orange rocket / green cube)
       eCtx.fillStyle = ch === "f" ? "#ff9a3d" : "#7dff5e";

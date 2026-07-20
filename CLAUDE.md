@@ -93,6 +93,8 @@ u  flip-gravity portal   (gravity points UP: the cube falls upward)
 n  normal-gravity portal (gravity points down again)
 f  fly portal    (become a rocket: HOLD to climb, let go to drop)
 c  cube portal   (back to a normal jumping cube)
+h  hole gate     (the ground switches OFF — nothing to stand on)
+g  ground gate   (the ground comes back)
 ```
 
 Speed portals (`>` `<`) are full-column gates: crossing the column's midline (at
@@ -142,6 +144,28 @@ callback, and `simState` exposes it as `state.holding`. `input.js` also releases
 on `pointercancel` and `blur`, so a finger sliding off a tablet cannot leave the
 rocket thrusting by itself.
 
+Ground gates (`h` `g`) are full-column gates too, and absolute like the rest.
+**The "ground" is whichever surface gravity pulls you onto** — normally the floor
+at y = 0, and under flipped gravity the roof of the world. An `h` switches that
+surface off; a `g` builds it back. This applies to **everyone**, a running cube as
+much as a rocket: with no ground there is simply nothing to stand on, so you drop
+through and, once you are fully past where the ground would have been, you have
+fallen out of the world and die.
+
+The *other* side of the world is not ground and is unaffected by `h`/`g`: it stays
+a soft wall while flying (so a rocket can never shoot out through the top), and in
+cube play it does not exist at all. Blocks, platforms and pads still work normally
+over a hole, so `h` is also how you build a gap to jump or a run of floating
+platforms. Ground state is part of the checkpoint snapshot, and a level always
+starts with the ground on.
+
+`groundSpans(level)` in `js/game/level.js` answers "is the ground on at column N?"
+for the renderer, by the same last-gate-wins rule the physics follows as you run
+past them; it is worked out once per level and remembered, because `draw()` needs
+it every frame. **The ground is drawn column by column inside the world transform**
+(in runs, so there are no seams) rather than as one screen-wide rectangle — that
+is what makes a hole actually look like a hole.
+
 **The editor sizes itself to the tablet.** `ED.cell` is never a fixed number — it
 is worked out each redraw so the *whole* level fits the space available
 (`fitCell()`), with 🔍−/🔍+ zoom steps on top. This matters because the grid is
@@ -190,7 +214,7 @@ padded, row indices, `"col,row"` coin keys and stored level strings are unaffect
 | `js/api.js` | Every `fetch`: `apiGet`, `apiWrite` (family PIN + one retry), `apiPost` (scores, no PIN). Owns the PIN and the PIN / "are you sure?" pop-ups. |
 | `js/input.js` | Taps and keys → actions: jump, hold-to-keep-jumping, reporting held-ness (`setHolding`, for flight), Escape, Z/X checkpoints, in-game buttons. |
 | `js/music.js` | The chiptune synth (`Music`) and the `SONGS` list. |
-| `js/game/level.js` | The level format: `parseLevel`, the tile legend, and the `tileAt` / `cellTop` / `skyTop` lookups. |
+| `js/game/level.js` | The level format: `parseLevel`, the tile legend, and the `tileAt` / `cellTop` / `skyTop` / `groundSpans` lookups. |
 | `js/game/physics.js` | **Pure.** The rules of the world at a fixed 240 Hz: `stepPhysics(state, dt)`, `requestJump(state)`. No DOM, canvas, sound or fetch. |
 | `js/game/render.js` | Drawing a frame: sky, ground, every tile, HUD, and the win/death overlays. |
 | `js/game/player.js` | How a cube *looks*: `drawPlayer`, `normalizeSkin`, `hslToHex`. Shared by the game, the previews and the picker buttons. |
@@ -439,7 +463,7 @@ later, and compared with `timingSafeEqual`. Five wrong guesses locks that name f
 password give the *same* message, so guessing can't discover who exists.
 
 Server-side level validation (`lib/validate.js`, returns clear messages): only the
-characters `. # ^ o * | / \ = - p U s @ > < u n f c`, all rows equal length, at most one
+characters `. # ^ o * | / \ = - p U s @ > < u n f c h g`, all rows equal length, at most one
 `|`, ≤ 500 columns, ≤ 30 rows. The allowed-character list is defined **once**
 (`LEVEL_CHARS`) and the error message is generated from it, so the two can't drift.
 
@@ -523,6 +547,10 @@ Two automatic checks, both run by `npm test`:
 - Jump, pad bounce, spike death, coin pickup, and finish all work by tap alone.
 - The newer tiles behave: saw, small pad, catapult, `@` checkpoint respawn, speed
   portals, and a gravity flip (landing on the ceiling) and back.
+- Ground gates (`h` … `g`): the floor visibly disappears after an `h`; a running
+  cube falls through it and dies; a rocket can fly over the gap; a `g` brings the
+  ground back and you can land on it. Upside-down (after a `u`) an `h` takes the
+  ROOF away instead and you fall upward out of the world.
 - Flying (`f` … `c`): holding climbs and letting go drops; the cube scrapes the
   floor and the roof without dying; spikes, saws and block *sides* still kill;
   pads and ramps do nothing; a `u` mid-flight reverses the thrust; a `@` inside a

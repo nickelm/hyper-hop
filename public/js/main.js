@@ -137,6 +137,7 @@ let checkpointTagT = 0;            // seconds left to show the little "from chec
 let speedMult = 1;                 // how fast the world scrolls right now: 1 normal, set by  >  and  <  gates
 let gravityDir = 1;                // which way is DOWN: +1 normal (falls toward the floor), -1 flipped (falls up)
 let flying = false;                // are you a rocket right now? Set by the  f  and  c  gates
+let groundOn = true;               // is there any ground to stand on? Set by the  h  and  g  gates
 let holding = false;               // is a finger (or the space bar) held down? input.js keeps this up to date
 
 // The music calls this on every step. There are 2 steps per beat, so the
@@ -178,6 +179,7 @@ function resetRun() {
   speedMult = 1;                       // back to normal speed
   gravityDir = 1;                      // and normal (downward) gravity
   flying = false;                      // every level starts you as a cube, never a rocket
+  groundOn = true;                     // and the ground always starts switched on
   totalCoins = 0;
   for (const row of S.level.grid) for (const c of row) if (c === "*") totalCoins++;
   // Restart the tune from the very beginning so obstacles line up with the
@@ -196,7 +198,8 @@ function dropCheckpoint() {
     coins: new Set(coinsGot),          // remember which coins were already grabbed
     speedMult: speedMult,              // and the speed you were going
     gravityDir: gravityDir,            // and which way gravity pointed
-    flying: flying,                    // and whether you were a rocket or a cube
+    flying: flying,                    // whether you were a rocket or a cube
+    groundOn: groundOn,                // and whether there was ground under you
   });
   sfx.coin();
 }
@@ -216,6 +219,7 @@ function restoreCheckpoint() {
   speedMult = (cp.speedMult != null) ? cp.speedMult : 1;   // restore the speed too
   gravityDir = (cp.gravityDir != null) ? cp.gravityDir : 1; // and the gravity direction
   flying = (cp.flying != null) ? cp.flying : false;         // and rocket-or-cube
+  groundOn = (cp.groundOn != null) ? cp.groundOn : true;    // and whether the ground was there
   bridgeFades = {};                    // bridges come back solid on a respawn
   particles = []; trail = []; shake = 0; winT = 0; deadT = 0;
   runPercent = 0; runWasBest = false;
@@ -238,6 +242,7 @@ function restoreTileCheckpoint() {
   speedMult = cp.speedMult;            // back to the speed you had at the checkpoint
   gravityDir = cp.gravityDir;          // and the gravity direction you had
   flying = cp.flying;                  // dying inside a flight section puts you back in a rocket
+  groundOn = cp.groundOn;              // and a hole is still a hole when you come back
   bridgeFades = {};                    // bridges come back solid on a respawn
   squash = 0;
   particles = []; trail = []; shake = 0; winT = 0; deadT = 0;
@@ -263,6 +268,7 @@ const simState = {
   get speedMult() { return speedMult; }, set speedMult(v) { speedMult = v; },
   get gravityDir() { return gravityDir; }, set gravityDir(v) { gravityDir = v; },
   get flying() { return flying; }, set flying(v) { flying = v; },
+  get groundOn() { return groundOn; }, set groundOn(v) { groundOn = v; },
   get holding() { return holding; },
   get coinsGot() { return coinsGot; },
   get trail() { return trail; },
