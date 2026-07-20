@@ -7,7 +7,7 @@ the coins, and reach the finish flag.
 **▶ Play it:** https://cooljaguar.duckdns.org/
 
 > The game (in `public/`) is plain HTML/CSS/JS — no build step, no frameworks, no
-> client dependencies. A tiny Node + Express server (`server.js`) stores everyone's
+> client dependencies. A tiny Node + Express server (`server/`) stores everyone's
 > levels and shared settings so the kids can save straight from their tablets. It's
 > a family project: built by a professor with two 9-year-old co-developers who
 > design the levels and tune the game.
@@ -18,7 +18,7 @@ You need [Node.js](https://nodejs.org) (LTS). Then:
 
 ```bash
 npm install
-FAMILY_PIN=1234 node server.js
+FAMILY_PIN=1234 node server/server.js
 ```
 
 Then open <http://localhost:3000>. On a tablet on the same network, open
