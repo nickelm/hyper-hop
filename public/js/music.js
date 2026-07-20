@@ -23,14 +23,14 @@
          BPM 180 -> 3 tiles per beat  (fast)
    ================================================================ */
 
-const MUSIC = {
+export const MUSIC = {
   ON: true,          // master switch for ALL music. false = total silence
   VOLUME: 0.5,       // 0 = silent, 1 = loud (the game can change this live)
 };
 
 // The jukebox! Each song is a little band of tracks that play at once.
 // Levels choose a song by its position in this list (0 = the first one).
-const SONGS = [
+export const SONGS = [
 
   {
     name: "Hyper Hop",          // the classic theme — bright and bouncy (E minor)
@@ -80,6 +80,30 @@ const SONGS = [
     HAT:   `x x x x x x x x`,
   },
 
+  {
+    name: "Magical Sound Shower",   // Outrun cruising theme — bright & breezy (C major)
+    BPM: 135,                       // 4 tiles per beat — that classic Hyper Hop feel
+    LEAD: `G4 .  C5 .  E5 D5 C5 .  | D5 .  E5 .  C5 .  .  . |
+           A4 .  D5 .  F5 E5 D5 .  | E5 .  C5 .  G4 .  .  . `,
+    BASS: `C2 C2 C3 C2 G2 G2 C3 C2 | A1 A1 A2 A1 E2 E2 A2 A1 |
+           D2 D2 D3 D2 F2 F2 D3 D2 | G2 G2 G3 G2 D2 D2 G2 G2`,
+    KICK:  `x . . x . . x .`,
+    SNARE: `. . x . . . x .`,
+    HAT:   `x x x x x x x x`,
+  },
+
+  {
+    name: "Axel F",                 // Beverly Hills Cop — that sneaky bouncy hook (F minor)
+    BPM: 108,                       // 5 tiles per beat — relaxed and cool
+    LEAD: `F4 .  Ab4 . F4 .  Bb4 F4 | Eb4 . F4 .  .  .  .  . |
+           F4 .  C5 .  F4 .  Db5 C5 | Ab4 . F4 .  Eb4 . F4 . `,
+    BASS: `F2 F2 F3 F2 F2 F2 F3 F2 | F2 F2 F3 F2 F2 F2 F3 F2 |
+           Ab1 Ab1 Ab2 Ab1 Ab1 Ab1 Ab2 Ab1 | Db2 Db2 Db3 Db2 C2 C2 C3 C2`,
+    KICK:  `x . . . x . . .`,
+    SNARE: `. . x . . . x .`,
+    HAT:   `x . x x x . x x`,
+  },
+
 ];
 
 /* ================================================================
@@ -89,10 +113,11 @@ const SONGS = [
    the beat never wobbles even when the game is working hard.
    ================================================================ */
 
-const Music = (() => {
+export const Music = (() => {
   let ctx = null, master = null;
   let timer = null, nextStepTime = 0, step = 0;
   let song = SONGS[0];                            // the song playing right now
+  let bpmOverride = 0;                            // 0 = each song keeps its own BPM; otherwise force this beat
   const LOOKAHEAD_MS = 25, SCHEDULE_AHEAD = 0.12;
 
   const NOTE_INDEX = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
@@ -159,7 +184,8 @@ const Music = (() => {
   }
 
   function tick() {
-    const stepDur = 60 / song.BPM / 2;              // 2 steps per beat (eighths)
+    const bpm = bpmOverride || song.BPM;            // the "Music speed" setting can force a beat
+    const stepDur = 60 / bpm / 2;                   // 2 steps per beat (eighths)
     while (nextStepTime < ctx.currentTime + SCHEDULE_AHEAD) {
       playStep(step, nextStepTime, stepDur);
       nextStepTime += stepDur;
@@ -199,6 +225,9 @@ const Music = (() => {
       MUSIC.VOLUME = v;
       if (master) master.gain.value = v * 0.5;
     },
+    // Force every song to a chosen beat (BPM). Pass 0 to let each song keep
+    // its own speed. Takes effect on the next steps, even mid-song.
+    setBpm(v) { bpmOverride = Number(v) || 0; },
     stop() { if (timer) { clearInterval(timer); timer = null; } },
   };
 })();

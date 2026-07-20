@@ -1,0 +1,208 @@
+// ============================================================
+// validate.js — the bouncer for everything a tablet sends up.
+// ============================================================
+// Every level, settings change, high score, and cube skin that
+// comes from a tablet is checked here before we save it. If it
+// looks wrong we throw an Error with a kid-friendly message the
+// server can show. The list of allowed level tiles lives here,
+// once, so it can never drift out of sync with itself.
+
+"use strict";
+
+// ---------- Rules for a valid level ----------
+// The ONE list of tiles a level is allowed to use. Everything that
+// checks or describes level tiles reads from this, so there is a
+// single source of truth.
+const LEVEL_CHARS = new Set([".", "#", "^", "o", "*", "|", "/", "\\", "=", "-", "p", "U", "s", "@", ">", "<", "u", "n"]);
+const LEVEL_CHARS_HELP = [...LEVEL_CHARS].join(" ");   // "‎. # ^ o * | / \ = - ..." for error messages
+const MAX_COLS = 500;
+const MAX_ROWS = 30;
+
+// ---------- Rules for a valid cube skin (looks only, never physics) ----------
+// A skin is a little bundle of choices about how a player's cube LOOKS.
+// The lists below are the only allowed choices for each part. Anything a
+// tablet sends that isn't in these lists is quietly swapped for the default,
+// so an old or broken skin can never crash the game.
+const SKIN_COLOR = /^#[0-9a-fA-F]{6}$/;                 // a color like "#7dff5e"
+const SKIN_SHAPES = new Set(["square", "rounded", "circle", "diamond", "hex"]);
+const SKIN_FACES = new Set(["none", "happy", "cool", "angry", "silly", "sleepy", "robot", "emoji"]);
+const SKIN_TRAILS = new Set(["off", "fade", "rainbow", "bubbles"]);
+const SKIN_EXPLOSIONS = new Set(["squares", "stars", "confetti", "emoji"]);
+// The classic green cube the game always had — every missing part falls back here.
+const DEFAULT_SKIN = {
+  bodyColor: "#7dff5e",
+  outlineColor: "#ffffff",
+  faceColor: "#05051a",
+  shape: "square",
+  face: "happy",
+  emoji: "😀",
+  trail: "fade",
+  explosion: "squares",
+};
+const MAX_NAME = 20;                 // a player name is 1–20 letters
+
+// The full list of CONFIG names the settings file is allowed to override.
+// (This must stay in sync with the CONFIG block in public/index.html.)
+const KNOWN_SETTING_KEYS = new Set([
+  "SCROLL_SPEED", "GRAVITY", "JUMP_POWER", "PAD_POWER", "SPIN_SPEED",
+  "TILE", "PLAYER_SIZE", "SPIKE_MERCY",
+  "PLAYER_COLOR", "PLAYER_EYE_COLOR", "BLOCK_COLOR", "BLOCK_EDGE",
+  "SPIKE_COLOR", "PAD_COLOR", "COIN_COLOR", "GROUND_COLOR",
+  "SKY_TOP", "SKY_BOTTOM",
+  "PARTICLES_ON_DEATH", "TRAIL", "SCREEN_SHAKE",
+  "SOUND", "MUSIC", "MUSIC_VOLUME", "MUSIC_BPM", "BEAT_PULSE",
+]);
+
+// Trim blank lines off the top and bottom (the level format often has a
+// leading newline) and drop trailing spaces so rows line up.
+function normalizeLevel(text) {
+  const lines = String(text).replace(/\r/g, "").split("\n");
+  while (lines.length && lines[0].trim() === "") lines.shift();
+  while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+  return lines.join("\n");
+}
+
+// Check that a level is drawn with legal tiles and is not silly-huge.
+// Returns the cleaned-up {name, author, level, song, theme}, or throws
+// an Error with a message we are happy to show the kids.
+function validateLevel(body) {
+  const name = (body && typeof body.name === "string") ? body.name.trim() : "";
+  if (!name) throw new Error("Please give the level a name.");
+
+  if (!body || typeof body.level !== "string") throw new Error("The level is missing its grid.");
+  const level = normalizeLevel(body.level);
+  const rows = level.split("\n");
+  if (rows.length === 0 || rows.every(r => r === "")) throw new Error("The level is empty.");
+
+  if (rows.length > MAX_ROWS) throw new Error("Too many rows (max " + MAX_ROWS + ").");
+
+  const width = rows[0].length;
+  if (width > MAX_COLS) throw new Error("Too wide (max " + MAX_COLS + " columns).");
+
+  let finishCount = 0;
+  for (const row of rows) {
+    if (row.length !== width) throw new Error("All rows must be the same length.");
+    for (const ch of row) {
+      if (!LEVEL_CHARS.has(ch)) throw new Error("That character is not allowed: \"" + ch + "\". Use only " + LEVEL_CHARS_HELP);
+      if (ch === "|") finishCount++;
+    }
+  }
+  if (finishCount > 1) throw new Error("A level can have at most one finish line (|).");
+
+  // Keep name/author tidy and a sensible length.
+  const author = (body.author && typeof body.author === "string") ? body.author.trim() : "";
+  const song = Number.isFinite(body.song) ? Math.max(0, Math.floor(body.song)) : 0;
+  const theme = Number.isFinite(body.theme) ? Math.max(0, Math.floor(body.theme)) : 0;
+  return {
+    name: name.slice(0, 40),
+    author: (author || "Anonymous").slice(0, 40),
+    level,
+    song,
+    theme,
+  };
+}
+
+// Settings overrides must be a flat object of known CONFIG names with
+// simple values (number / string / true / false).
+function validateSettings(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new Error("Settings must be an object.");
+  }
+  const clean = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (!KNOWN_SETTING_KEYS.has(key)) throw new Error("Unknown setting: " + key);
+    const t = typeof value;
+    if (t !== "number" && t !== "string" && t !== "boolean") {
+      throw new Error("Setting " + key + " has a strange value.");
+    }
+    clean[key] = value;
+  }
+  return clean;
+}
+
+// A high score is one player's best on one level: which level, who, and how
+// far they got (0–100%). We check the level really exists so scores can't
+// pile up for a level nobody has.
+function validateScore(body, levels) {
+  const levelId = (body && Number.isFinite(body.levelId)) ? Math.floor(body.levelId) : null;
+  if (levelId === null || !levels.some(L => Number(L.id) === levelId)) {
+    throw new Error("That level does not exist.");
+  }
+  const player = (body && typeof body.player === "string") ? body.player.trim() : "";
+  if (!player) throw new Error("Please say who is playing.");
+
+  let percent = Number.isFinite(body.percent) ? Math.round(body.percent) : 0;
+  percent = Math.max(0, Math.min(100, percent));   // keep it inside 0–100
+  return { levelId, player: player.slice(0, 40), percent };
+}
+
+// Count how many WHOLE emoji are in a little string. Intl.Segmenter knows that
+// things like 👍🏽 or 👨‍👩‍👧 are one emoji even though they are several code points
+// glued together; if it isn't around we fall back to counting code points.
+function countEmoji(str) {
+  if (typeof Intl !== "undefined" && Intl.Segmenter) {
+    return [...new Intl.Segmenter().segment(str)].length;
+  }
+  return Array.from(str).length;
+}
+
+// Clean up one cube skin. We build a brand-new object with ONLY the parts we
+// allow, so any extra fields a tablet sends are dropped (this keeps us safe if
+// a newer game adds skin options we don't know about yet). Each part falls back
+// to the classic default if it's missing or looks wrong — EXCEPT a color that is
+// there but malformed, or an over-long "emoji", which we refuse loudly so a typo
+// doesn't silently turn green.
+function cleanSkin(raw) {
+  const s = (raw && typeof raw === "object" && !Array.isArray(raw)) ? raw : {};
+
+  const color = (value, fallback) => {
+    if (value == null) return fallback;                 // missing → default
+    if (typeof value !== "string" || !SKIN_COLOR.test(value)) {
+      throw new Error("A cube color must look like #7dff5e.");
+    }
+    return value.toLowerCase();
+  };
+  const choice = (value, allowed, fallback) =>
+    (typeof value === "string" && allowed.has(value)) ? value : fallback;
+
+  // The emoji is only used for the "emoji" face/explosion, but we always tidy it.
+  // We count whole emoji, so a 50-letter "emoji" is rejected but a fancy one-emoji
+  // like 👍🏽, 🇸🇪 or 👨‍👩‍👧 (which are secretly several letters glued together) still counts as ONE.
+  let emoji = DEFAULT_SKIN.emoji;
+  if (s.emoji != null) {
+    if (typeof s.emoji !== "string") throw new Error("That emoji looks wrong.");
+    const trimmed = s.emoji.trim();
+    if (trimmed) {
+      if (trimmed.length > 32 || countEmoji(trimmed) > 1) throw new Error("Please pick just one emoji.");
+      emoji = trimmed;
+    }
+  }
+
+  return {
+    bodyColor: color(s.bodyColor, DEFAULT_SKIN.bodyColor),
+    outlineColor: color(s.outlineColor, DEFAULT_SKIN.outlineColor),
+    faceColor: color(s.faceColor, DEFAULT_SKIN.faceColor),
+    shape: choice(s.shape, SKIN_SHAPES, DEFAULT_SKIN.shape),
+    face: choice(s.face, SKIN_FACES, DEFAULT_SKIN.face),
+    emoji,
+    trail: choice(s.trail, SKIN_TRAILS, DEFAULT_SKIN.trail),
+    explosion: choice(s.explosion, SKIN_EXPLOSIONS, DEFAULT_SKIN.explosion),
+  };
+}
+
+// A profile is one player: a name plus the cube skin they made. Returns the
+// tidy {name, skin}, or throws an Error with a message we can show the kids.
+function validateProfile(body) {
+  const name = (body && typeof body.name === "string") ? body.name.trim() : "";
+  if (!name) throw new Error("Please give your cube a name.");
+  if (Array.from(name).length > MAX_NAME) {
+    throw new Error("That name is too long (max " + MAX_NAME + " letters).");
+  }
+  return { name: name.slice(0, MAX_NAME), skin: cleanSkin(body && body.skin) };
+}
+
+module.exports = {
+  LEVEL_CHARS, MAX_COLS, MAX_ROWS, DEFAULT_SKIN, MAX_NAME, KNOWN_SETTING_KEYS,
+  normalizeLevel, validateLevel, validateSettings, validateScore,
+  countEmoji, cleanSkin, validateProfile,
+};

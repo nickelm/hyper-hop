@@ -1,0 +1,41 @@
+# Caddyfile for Hyper Hop
+# =======================
+# Caddy sits in front of the Node server and gives us free, automatic HTTPS.
+# It fetches a certificate from Let's Encrypt on its own, as long as:
+#   * ports 80 and 443 are open in the firewall, and
+#   * the name below points at this droplet's IP (set that up in DuckDNS).
+#
+# The Node server itself listens on localhost:8080 (set PORT in
+# /etc/hyper-hop.env). Caddy forwards visitors to it.
+#
+# Put this file at /etc/caddy/Caddyfile, then:  sudo systemctl reload caddy
+
+cooljaguar.duckdns.org {
+	reverse_proxy localhost:8080
+}
+
+
+# ----------------------------------------------------------------------------
+# ALTERNATIVES — pick ONE style. Comment out the block above if you use one.
+# ----------------------------------------------------------------------------
+
+# Alternative A — just a plain port, no HTTPS (handy for a quick test).
+# Visit http://cooljaguar.duckdns.org:8080/ directly, with no Caddy at all.
+# (You normally don't need this: the block at the top already gives you HTTPS.)
+#
+# :8080 {
+# 	reverse_proxy localhost:8080
+# }
+
+# Alternative B — share the domain with other sites, under a subfolder.
+# Serves the game at  https://cooljaguar.duckdns.org/hyperhop/
+# The game works out its own API path from the page URL, so nothing else
+# needs changing. Note the redirect so /hyperhop (no slash) still works.
+#
+# cooljaguar.duckdns.org {
+# 	redir /hyperhop /hyperhop/
+# 	handle_path /hyperhop/* {
+# 		reverse_proxy localhost:8080
+# 	}
+# 	# ... your other sites' handle blocks go here ...
+# }

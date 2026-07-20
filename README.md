@@ -4,23 +4,29 @@ A tiny Geometry Dash-style auto-runner that runs in any browser. A cube scrolls
 to the right on its own — **tap or press Space to jump**, dodge the spikes, grab
 the coins, and reach the finish flag.
 
-**▶ Play it:** https://&lt;username&gt;.github.io/hyper-hop/
+**▶ Play it:** https://cooljaguar.duckdns.org/
 
-> The whole game is a single self-contained `index.html` — no build step, no
-> frameworks, no dependencies. It's a family project: built by a professor with
-> two 9-year-old co-developers who design the levels and tune the game.
+> The game (in `public/`) is plain HTML/CSS/JS — no build step, no frameworks, no
+> client dependencies. A tiny Node + Express server (`server/`) stores everyone's
+> levels and shared settings so the kids can save straight from their tablets. It's
+> a family project: built by a professor with two 9-year-old co-developers who
+> design the levels and tune the game.
 
 ## Play locally
 
-No install needed. Either open `index.html` directly in a browser, or serve the
-folder (recommended, and how it's played on tablets over the LAN):
+You need [Node.js](https://nodejs.org) (LTS). Then:
 
 ```bash
-python3 -m http.server 8000
+npm install
+FAMILY_PIN=1234 node server/server.js
 ```
 
-Then open <http://localhost:8000>. On a tablet on the same network, open
-`http://<your-computer-ip>:8000`.
+Then open <http://localhost:3000>. On a tablet on the same network, open
+`http://<your-computer-ip>:3000`. The `FAMILY_PIN` is the secret you type to save
+levels or shared settings — anyone can play without it.
+
+The first run creates a `data/` folder with four starter levels. Levels and
+settings are saved there (and backed up automatically); it's gitignored on purpose.
 
 ## Controls
 
@@ -48,8 +54,8 @@ o  bounce pad (launches you upward)
 
 The floor is automatic — you don't draw it; the bottom row of the grid sits on
 the ground. All rows in a level must be the same length. Add more rows to make a
-taller level. The built-in levels live in the `LEVELS` array near the top of
-`index.html`.
+taller level. Levels live on the server in `data/levels.json` (seeded with four
+starter levels on first run) and are downloaded when the game starts.
 
 ## Built-in level editor
 
@@ -58,29 +64,38 @@ Tap **✎ Level Editor** on the menu to open it:
 1. Pick a tile from the palette and **tap-to-paint** on the grid (use **Wider +**
    to add length).
 2. Tap **▶ Play** to test your level immediately.
-3. Tap **Copy code** to export a paste-ready level string.
+3. Tap **⬇ Save to server** to share it — you name it and say who made it once,
+   then type the family PIN. It shows up on everyone's menu.
+4. Tap the **✎** next to a level on the menu to open and change it later.
 
-Paste that string as a new entry in the `LEVELS` array in `index.html`, and your
-level ships with the game. (Levels are saved through the code on purpose — there's
-no localStorage, so the kids' levels flow through git.)
+(The **Copy code** button still exports a paste-ready level string as a manual
+backup.)
+
+## Shared settings
+
+Tap the **⚙ Settings** gear on the menu (or in-game) to open the Control Panel.
+Changes are just for you until you tap **★ Save for everyone**, which saves the
+starred settings (speed, gravity, jump, colors, sound, music…) to the server for
+all players. **Reset for everyone** puts them back to the defaults.
 
 ## Tweaking the game
 
-Open `index.html` and look at the `CONFIG` block at the very top. Every gameplay
-number is there with a kid-friendly comment — gravity, jump power, cube size,
-colors, sound, screen shake, and more. Change a number, refresh the page, and see
-what happens.
+Open `public/js/config.js` — that one file is the game's control panel. Every
+gameplay number is there with a kid-friendly comment — gravity, jump power, cube
+size, colors, sound, screen shake, and more. Change a number, refresh the page, and
+see what happens. (These are the *defaults*; the server's saved settings are layered
+on top at startup.)
 
-## Deploying to GitHub Pages
+The rest of the game is split into small files under `public/js/`, one job each —
+`game/physics.js` is the rules of the world, `game/render.js` draws it, `ui/editor.js`
+is the level editor, and so on. See CLAUDE.md for the full map.
 
-Because `index.html` is fully self-contained and sits at the repo root, no build
-or base-path setup is needed:
+## Deploying
 
-1. Push the repo to GitHub.
-2. In **Settings → Pages**, set **Source** to **Deploy from a branch**, branch
-   **`main`**, folder **`/ (root)`**.
-3. The site goes live at `https://<username>.github.io/hyper-hop/` within a minute
-   or two.
+The game runs as a small Node server behind Caddy (for automatic HTTPS) on a
+DigitalOcean droplet. Step-by-step instructions — Ubuntu setup, Node, the systemd
+service, firewall, the family PIN, and how to restore from a backup — are in
+[`deploy/SETUP.md`](deploy/SETUP.md).
 
 ## Credits
 
