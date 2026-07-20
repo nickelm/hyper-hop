@@ -19,36 +19,57 @@
 
 const fs = require("fs");
 const path = require("path");
-const { loadEngine } = require("./harness/load-engine");
+const { loadPhysics } = require("./harness/load-engine");
 const { FIXTURES } = require("./fixtures/levels");
 
 const STEPS = 2400;        // how many physics steps to run each level (~ a full run)
 const SAMPLE_EVERY = 8;    // write down the cube's state every this many steps
 const GOLDEN_DIR = path.join(__dirname, "golden");
 
-// Run one fixture and return its trace as a pretty, stable string.
-// Same engine + same fixture always gives the exact same text.
-function traceFor(hh, fixture) {
-  hh.startLevel(hh.parseLevel(fixture.level), false, false, fixture.song || 0, 0, null);
+// A fresh sim state at the start of a level — exactly what the game's
+// resetRun() sets up: the cube waits a few tiles to the left, gravity is
+// normal, speed is normal, no coins yet.
+function newState(hh, fixture) {
+  const T = hh.CONFIG.TILE;
+  const camX = -T * 5;                          // little run-up before the level starts
+  return {
+    level: hh.parseLevel(fixture.level),
+    player: { x: camX + T * 2, y: 0, vy: 0, rot: 0, onGround: true, onRamp: 0, dead: false, won: false },
+    camX: camX,
+    speedMult: 1,
+    gravityDir: 1,
+    coinsGot: new Set(),
+    trail: [],
+    bridgeFades: {},
+    tileCheckpoint: null,
+    activatedCheckpoints: new Set(),
+    events: [],
+  };
+}
 
+// Run one fixture through the pure physics and return its trace as a pretty,
+// stable string. Same physics + same fixture always gives the exact same text.
+function traceFor(hh, fixture) {
+  const state = newState(hh, fixture);
   const jumpSteps = new Set(fixture.jumpAt || []);
   const samples = [];
   for (let step = 0; step <= STEPS; step++) {
-    if (jumpSteps.has(step)) hh.jump();
+    if (jumpSteps.has(step)) hh.requestJump(state);
     if (step % SAMPLE_EVERY === 0) {
-      const p = hh.player;
+      const p = state.player;
       samples.push({
         step: step,
         x: p.x, y: p.y, vy: p.vy, rot: p.rot,
         onGround: p.onGround, onRamp: p.onRamp,
         dead: p.dead, won: p.won,
-        coins: hh.coinsGot.size,
-        camX: hh.camX,
-        gravityDir: hh.gravityDir,
-        speedMult: hh.speedMult,
+        coins: state.coinsGot.size,
+        camX: state.camX,
+        gravityDir: state.gravityDir,
+        speedMult: state.speedMult,
       });
     }
-    hh.physicsStep(hh.FIXED_DT);
+    hh.stepPhysics(state, hh.FIXED_DT);
+    state.events.length = 0;   // the harness ignores the physics' sound/splash notes
   }
 
   // Build the text by hand so the newlines are always "\n" (never
@@ -71,7 +92,7 @@ function main() {
   const check = process.argv.includes("--check");
   fs.mkdirSync(GOLDEN_DIR, { recursive: true });
 
-  const hh = loadEngine();
+  const hh = loadPhysics();
   let failures = 0;
 
   for (const fixture of FIXTURES) {

@@ -308,6 +308,7 @@ import {
   DEFAULT_SKIN, SKIN_BODY_COLORS, SKIN_OUTLINE_COLORS, SKIN_FACE_COLORS,
 } from "./js/config.js";
 import { parseLevel, tileAt, cellTop } from "./js/game/level.js";
+import { FIXED_DT, stepPhysics, requestJump } from "./js/game/physics.js";
 
 // Turn a rainbow-slider hue (0–360) into a "#rrggbb" color. We keep the
 // color bright and punchy (fixed saturation + lightness) so every hue looks
@@ -538,19 +539,9 @@ function restoreCheckpoint() {
 }
 
 // ---------------- Checkpoints (the  @  tiles) ----------------
-// Touching a  @  quietly saves where you are. A death then sends you back here
-// instead of all the way to the start. Touching a later  @  replaces the old one.
-// (Speed and gravity get saved into this snapshot too, in the later stages.)
-function dropTileCheckpoint(col, row) {
-  tileCheckpoint = {
-    x: player.x, y: player.y, vy: player.vy, rot: player.rot,
-    onGround: player.onGround, camX: camX,
-    coins: new Set(coinsGot),          // the coins you'd grabbed by this point
-    speedMult: speedMult,              // how fast you were going
-    gravityDir: gravityDir,            // and which way gravity was pointing
-  };
-  activatedCheckpoints.add(col + "," + row);   // this flag now shows up lit
-}
+// Touching a  @  saves your spot — that snapshot happens in js/game/physics.js.
+// Coming BACK to life at it is game flow (music, the on-screen tag), so it
+// lives here.
 // Come back to life at the checkpoint. Still counts as a new attempt, and the
 // music keeps playing (it only restarts on a full restart or a new level).
 function restoreTileCheckpoint() {
@@ -570,226 +561,59 @@ function restoreTileCheckpoint() {
   checkpointTagT = 2;                  // show "from checkpoint" for 2 seconds
 }
 
-// ---------------- Geometry helpers ----------------
-// Look down a whole column for a speed portal ( >  or  < ). Returns the character,
-// or null. Portals fill the column, so height doesn't matter — any row counts.
-function portalInColumn(col) {
-  if (col < 0 || col >= S.level.cols) return null;
-  for (let row = 0; row < S.level.rows; row++) {
-    const ch = S.level.grid[row][col];
-    if (ch === ">" || ch === "<") return ch;
-  }
-  return null;
-}
-// Same idea for gravity portals:  u  flips gravity,  n  sets it back to normal.
-function gravityPortalInColumn(col) {
-  if (col < 0 || col >= S.level.cols) return null;
-  for (let row = 0; row < S.level.rows; row++) {
-    const ch = S.level.grid[row][col];
-    if (ch === "u" || ch === "n") return ch;
-  }
-  return null;
-}
 
 
 // ---------------- Physics ----------------
-const FIXED_DT = 1 / 240;   // physics runs at 240 Hz so all tablets feel the same
+// The simulation itself lives in js/game/physics.js (pure: state in, state
+// out). This section wires it to the game: the shared `simState`, the game
+// loop, and turning the physics' little notes into sounds and splashes.
 let accumulator = 0, lastTime = 0;
 
-function physicsStep(dt) {
-  if (player.dead || player.won) return;
-  const T = CONFIG.TILE, half = CONFIG.PLAYER_SIZE / 2;
+// The physics module only ever touches this one `state` object. We build it
+// here as a LIVE VIEW of the game's own variables — reading or writing a field
+// on simState reads or writes the real variable — so the physics and the rest
+// of the game always agree, with no copying back and forth.
+const simState = {
+  get player() { return player; }, set player(v) { player = v; },
+  get camX() { return camX; }, set camX(v) { camX = v; },
+  get speedMult() { return speedMult; }, set speedMult(v) { speedMult = v; },
+  get gravityDir() { return gravityDir; }, set gravityDir(v) { gravityDir = v; },
+  get coinsGot() { return coinsGot; },
+  get trail() { return trail; },
+  get bridgeFades() { return bridgeFades; },
+  get level() { return S.level; },
+  get tileCheckpoint() { return tileCheckpoint; }, set tileCheckpoint(v) { tileCheckpoint = v; },
+  get activatedCheckpoints() { return activatedCheckpoints; },
+  events: [],
+};
 
-  const prevX = player.x;                    // remember where we were, for portal crossings
-  player.x += CONFIG.SCROLL_SPEED * speedMult * dt;
-  camX += CONFIG.SCROLL_SPEED * speedMult * dt;
-  player.vy += CONFIG.GRAVITY * gravityDir * dt;   // gravityDir flips which way "down" pulls
-  player.y += player.vy * dt;
-
-  // ---- portals: gates that fill a whole column and fire when the cube's CENTER
-  // crosses the column's middle (so they work at any height). A  >  speeds the
-  // world up, a  <  slows it down — absolute, not stacking (the newest one wins).
-  {
-    const colA = Math.floor(prevX / T) - 1, colB = Math.floor(player.x / T) + 1;
-    for (let c = colA; c <= colB; c++) {
-      const mid = c * T + T / 2;
-      if (prevX < mid && player.x >= mid) {   // just crossed this column's midline
-        const p = portalInColumn(c);
-        if (p === ">") speedMult = CONFIG.FAST_MULT;
-        else if (p === "<") speedMult = CONFIG.SLOW_MULT;
-        const g = gravityPortalInColumn(c);   // u = flip gravity, n = back to normal (absolute)
-        if (g === "u") gravityDir = -1;
-        else if (g === "n") gravityDir = 1;
-      }
+// The physics never makes noise itself — it just leaves notes in
+// simState.events (a coin grabbed, a pad hit, a death, a win). We act on those
+// notes here, in the game, once per frame: play the sound, shake the screen,
+// explode the cube, save the score.
+function drainSimEvents() {
+  for (const ev of simState.events) {
+    if (ev === "pad") sfx.pad();
+    else if (ev === "catapult") { sfx.catapult(); squash = 1; }
+    else if (ev === "coin") sfx.coin();
+    else if (ev === "die") {
+      deadT = 0; shake = CONFIG.SCREEN_SHAKE; sfx.death();
+      runPercent = Math.round(levelProgress() * 100);   // how far you got, for the high score
+      submitScore(runPercent);
+      spawnExplosion(player.x, player.y, activeSkin(), particles);
+    } else if (ev === "win") {
+      winT = 0; sfx.win();
+      runPercent = 100;                                 // reaching the finish is 100%
+      submitScore(runPercent);
     }
   }
-
-  // spin in the air, snap when landed
-  if (!player.onGround) player.rot += CONFIG.SPIN_SPEED * dt;
-
-  player.onGround = false;
-
-  // The ground you land on depends on gravity: normally the implicit floor at
-  // the bottom (y = 0); flipped, the implicit ceiling at the top of the grid.
-  if (gravityDir > 0) {
-    if (player.y + half >= 0) {
-      player.y = -half; player.vy = 0; player.onGround = true;
-      player.rot = Math.round(player.rot / 90) * 90;
-    }
-  } else {
-    const yCeil = cellTop(S.level, 0);                 // top edge of the grid, mirroring the floor
-    if (player.y - half <= yCeil) {
-      player.y = yCeil + half; player.vy = 0; player.onGround = true;
-      player.rot = Math.round(player.rot / 90) * 90;
-    }
-  }
-
-  // columns near the player (used by both the ramp pass and the tile pass)
-  const c0 = Math.floor((player.x - half) / T) - 1, c1 = Math.floor((player.x + half) / T) + 1;
-
-  // ---- ramps: sloped ground that only ever pushes you UP, never kills ----
-  // We do this BEFORE the block/spike pass so a ramp lifts the cube onto a
-  // block stack instead of the block's side killing it.
-  const wasOnRampUp = player.onRamp === 1;   // remember, so we can launch off the top of a /
-  player.onRamp = 0;
-  const jumping = player.vy < 0;             // going up (a jump or pad) always beats the ramp glue
-  // Ramps are ignored while gravity is flipped (they simply do nothing, and still
-  // never kill) — see the note in CLAUDE.md.
-  for (let col = c0; gravityDir > 0 && col <= c1; col++) {
-    for (let row = 0; row < S.level.rows; row++) {
-      const ch = tileAt(S.level, col, row);
-      if (ch !== "/" && ch !== "\\") continue;
-      const tx = col * T, ty = cellTop(S.level, row);
-      // only care when the cube's CENTER is over this ramp column (kind on purpose)
-      if (player.x < tx || player.x >= tx + T) continue;
-      const f = (player.x - tx) / T;                          // 0 at left edge, 1 at right edge
-      // where the top of the slope is at this x. / rises to the right, \ drops to the right.
-      const surfaceY = ch === "/" ? ty + T - f * T : ty + f * T;
-      const bottom = player.y + half;
-      // stick to the slope: cube sitting on it, sunk below it, or within RAMP_GLUE above it
-      if (!jumping && bottom >= surfaceY - CONFIG.RAMP_GLUE) {
-        player.y = surfaceY - half;
-        if (player.vy > 0) player.vy = 0;
-        player.onGround = true;
-        player.onRamp = ch === "/" ? 1 : -1;
-        player.rot = player.onRamp === 1 ? -45 : 45;          // tilt the cube to match the slope
-      }
-    }
-  }
-
-  // tiles near the player
-  for (let col = c0; col <= c1; col++) {
-    for (let row = 0; row < S.level.rows; row++) {
-      const ch = tileAt(S.level, col, row);
-      if (ch === ".") continue;
-      const tx = col * T, ty = cellTop(S.level, row);            // tile top-left
-      const overlapX = player.x + half > tx && player.x - half < tx + T;
-      const overlapY = player.y + half > ty && player.y - half < ty + T;
-
-      if (ch === "#") {
-        if (!overlapX || !overlapY) continue;
-        if (gravityDir > 0) {
-          // normal: land on the TOP if we were above it last step and falling down
-          const prevBottom = player.y + half - player.vy * dt;
-          if (player.vy >= 0 && prevBottom <= ty + 6) {
-            player.y = ty - half; player.vy = 0; player.onGround = true;
-            player.rot = Math.round(player.rot / 90) * 90;
-          } else if (!player.onRamp) {
-            die();                                      // hit the side or bottom
-          }
-        } else {
-          // flipped: land on the UNDERSIDE if we were below it last step and falling up
-          const prevTop = player.y - half - player.vy * dt;
-          if (player.vy <= 0 && prevTop >= ty + T - 6) {
-            player.y = ty + T + half; player.vy = 0; player.onGround = true;
-            player.rot = Math.round(player.rot / 90) * 90;
-          } else if (!player.onRamp) {
-            die();                                      // hit the side or top
-          }
-        }
-        // If a ramp is holding us up (onRamp), a block beside us must NOT kill:
-        // the ramp is carrying us up the side of the stack onto its top.
-      } else if (ch === "^") {
-        // forgiving spike hitbox: a smaller box in the middle
-        const m = T * CONFIG.SPIKE_MERCY;
-        const hx = tx + m, hw = T - 2 * m, hy = ty + m, hh = T - m;
-        if (player.x + half > hx && player.x - half < hx + hw &&
-            player.y + half > hy && player.y - half < hy + hh) die();
-      } else if (ch === "s") {
-        // saw blade: a round deadly circle in the middle of the tile.
-        // Find the point on the cube's box closest to the circle's center;
-        // if that point is inside the circle, the saw got us.
-        const cx = tx + T/2, cy = ty + T/2, rad = CONFIG.SAW_RADIUS * T;
-        const nearestX = Math.max(player.x - half, Math.min(cx, player.x + half));
-        const nearestY = Math.max(player.y - half, Math.min(cy, player.y + half));
-        const dx = cx - nearestX, dy = cy - nearestY;
-        if (dx*dx + dy*dy < rad*rad) die();
-      } else if (ch === "o" || ch === "p" || ch === "U") {
-        // pads and catapults: launch you toward whichever way is UP right now.
-        // You reach into the pad from the side gravity is pulling you.
-        const power = ch === "o" ? CONFIG.PAD_POWER : ch === "p" ? CONFIG.SMALL_PAD_POWER : CONFIG.CATAPULT_POWER;
-        const reached = gravityDir > 0 ? (player.y + half > ty + T * 0.4)
-                                       : (player.y - half < ty + T * 0.6);
-        if (overlapX && reached) {
-          player.vy = -power * gravityDir; player.onGround = false;
-          if (ch === "U") { sfx.catapult(); squash = 1; } else sfx.pad();
-        }
-      } else if (ch === "*") {
-        const key = col + "," + row;
-        if (!coinsGot.has(key) && overlapX && overlapY) { coinsGot.add(key); sfx.coin(); }
-      } else if (ch === "@") {
-        // checkpoint: quietly save this spot as your new respawn point
-        if (overlapX && overlapY) dropTileCheckpoint(col, row);
-      } else if (ch === "|") {
-        if (player.x + half > tx) win();
-      } else if (ch === "=" || ch === "-") {
-        // Jump-through platform: land on it only from the side gravity pulls you,
-        // and pass right through it the other way. It never kills.
-        if (overlapX) {
-          if (gravityDir > 0) {                         // normal: land on the top
-            const prevBottom = player.y + half - player.vy * dt;
-            if (player.vy >= 0 && prevBottom <= ty + 6) {
-              player.y = ty - half; player.vy = 0; player.onGround = true;
-              player.rot = Math.round(player.rot / 90) * 90;
-            }
-          } else {                                      // flipped: land on the underside
-            const slabBot = ty + T / 3;                 // the slab sits in the top third
-            const prevTop = player.y - half - player.vy * dt;
-            if (player.vy <= 0 && prevTop >= slabBot - 6) {
-              player.y = slabBot + half; player.vy = 0; player.onGround = true;
-              player.rot = Math.round(player.rot / 90) * 90;
-            }
-          }
-        }
-        // A  -  bridge is a platform that fades away once you've run past it.
-        // Just a look — a faded bridge still holds you up exactly the same.
-        if (ch === "-" && player.x > tx + T * 0.5 && bridgeFades[col + "," + row] === undefined) {
-          bridgeFades[col + "," + row] = 1;   // 1 = fully visible; draw() counts it down to 0
-        }
-      }
-    }
-  }
-
-  // Ran off the TOP of a  /  into open air? Give a little upward pop.
-  // (We check this AFTER the tile pass so walking straight onto a block or the
-  // floor — where onGround is now true — does NOT pop you. 0 = disabled.)
-  if (wasOnRampUp && !player.onGround && player.vy >= 0) {
-    player.vy = -CONFIG.RAMP_LAUNCH * CONFIG.SCROLL_SPEED;
-  }
-
-  // fell past end of level with no finish line? win anyway
-  if (player.x / T > S.level.cols + 3) win();
-
-  if (CONFIG.TRAIL && (trail.length === 0 || Math.abs(trail[trail.length-1].x - player.x) > 6)) {
-    trail.push({ x: player.x, y: player.y, life: 1 });
-    if (trail.length > 40) trail.shift();
-  }
+  simState.events.length = 0;
 }
+
 
 function jump() {
   if (S.screen !== "game" || S.paused) return;
-  if (player.dead || player.won) return;
-  if (player.onGround) { player.vy = -CONFIG.JUMP_POWER * gravityDir; player.onGround = false; sfx.jump(); }
+  if (requestJump(simState)) sfx.jump();   // physics does the jump; we make the sound
 }
 
 // How far through the level the cube is right now, 0 (start) to 1 (finish).
@@ -799,19 +623,6 @@ function levelProgress() {
   return Math.max(0, Math.min(1, (player.x / CONFIG.TILE) / S.level.cols));
 }
 
-function die() {
-  if (player.dead) return;
-  player.dead = true; deadT = 0; shake = CONFIG.SCREEN_SHAKE; sfx.death();
-  runPercent = Math.round(levelProgress() * 100);   // how far you got, for the high score
-  submitScore(runPercent);
-  spawnExplosion(player.x, player.y, activeSkin(), particles);
-}
-function win() {
-  if (player.won) return;
-  player.won = true; winT = 0; sfx.win();
-  runPercent = 100;                                 // reaching the finish is 100%
-  submitScore(runPercent);
-}
 
 // ---------------- Rendering ----------------
 
@@ -920,8 +731,9 @@ function drawFace(ctx, skin, hs) {
 //
 // COLLISION NOTE: the cube's hitbox is ALWAYS a CONFIG.PLAYER_SIZE square, no
 // matter what shape/size we draw here. Skins are LOOKS ONLY — they never change
-// where you can stand, what kills you, or how hard the level is. (physicsStep()
-// only ever uses CONFIG.PLAYER_SIZE for the hitbox — never the drawn shape.)
+// where you can stand, what kills you, or how hard the level is. (the physics
+// in js/game/physics.js only ever uses CONFIG.PLAYER_SIZE for the hitbox —
+// never the drawn shape.)
 function drawPlayer(ctx, x, y, rot, skin, size) {
   const s = normalizeSkin(skin);
   const hs = (size || CONFIG.PLAYER_SIZE) / 2;
@@ -1335,7 +1147,8 @@ function frame(t) {
   // Physics only runs while playing AND the control panel is closed.
   if (S.screen === "game" && !S.paused) {
     accumulator += dt;
-    while (accumulator >= FIXED_DT) { physicsStep(FIXED_DT); accumulator -= FIXED_DT; }
+    while (accumulator >= FIXED_DT) { stepPhysics(simState, FIXED_DT); accumulator -= FIXED_DT; }
+    drainSimEvents();
   } else {
     accumulator = 0;                        // don't pile up time while paused
   }
