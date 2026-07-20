@@ -14,6 +14,9 @@ import { showToast } from "./toast.js";
 // The bit of the game the panel needs to know about (are we playing?
 // which song?). main.js hands it over in initSettings().
 let S = null;
+// "Is this player allowed to…?" — main.js hands us login.js's checker.
+// Until it does, assume no, so the ★ buttons stay hidden.
+let may = () => false;
 
 // Each slider: [CONFIG name, label the kids see, smallest, biggest, step]
 const PANEL_SLIDERS = [
@@ -107,6 +110,12 @@ export function openPanel() {
   if (S.screen === "game") S.paused = true;
   buildPanel();                 // fill in the sliders with the current numbers
   document.getElementById("closePanelBtn").textContent = (S.screen === "game") ? "Close & play" : "Close";
+  // The two ★ "for everyone" buttons change the game for EVERY player, so
+  // only a grown-up sees them. Anybody can still play with the sliders —
+  // that just changes their own game, for this visit.
+  const forEveryone = may("settings.edit");
+  document.getElementById("saveEveryoneBtn").classList.toggle("hidden", !forEveryone);
+  document.getElementById("resetEveryoneBtn").classList.toggle("hidden", !forEveryone);
   document.getElementById("controlPanel").classList.remove("hidden");
 }
 export function closePanel() {
@@ -123,6 +132,7 @@ function applyMusicSettings() {
 // Wire up the panel's buttons. main.js calls this once at startup.
 export function initSettings(deps) {
   S = deps.S;
+  if (deps.may) may = deps.may;
 
   document.getElementById("closePanelBtn").onclick = closePanel;
 
@@ -140,7 +150,7 @@ export function initSettings(deps) {
     try {
       await apiWrite("PUT", "/settings", overrides);
       showToast("Saved for everyone!");
-    } catch (e) { if (e.message !== "cancelled") showToast(e.message); }
+    } catch (e) { showToast(e.message); }
   };
 
   // Reset for everyone: clear the server's shared settings and go back to defaults.
@@ -151,6 +161,6 @@ export function initSettings(deps) {
       applyMusicSettings();
       buildPanel();
       showToast("Reset for everyone!");
-    } catch (e) { if (e.message !== "cancelled") showToast(e.message); }
+    } catch (e) { showToast(e.message); }
   };
 }

@@ -12,35 +12,79 @@ import { CONFIG, DEFAULT_SKIN, SHAPES, FACES, TRAIL_STYLES, EXPLOSION_STYLES,
 import { hslToHex, normalizeSkin, drawPlayer } from "../game/player.js";
 import { drawTrail, spawnExplosion, renderParticles } from "../game/effects.js";
 import { apiWrite } from "../api.js";
+import { skinCost, balance, havePrices } from "../economy.js";
 import { showToast } from "./toast.js";
 
 // The bits of the game this page needs. main.js fills them in with initSkins().
 let S = null;
 let showScreen = () => {};
 let getGravityDir = () => 1;
+let getMe = () => null;
 let onSaved = async () => {};
 
 export function initSkins(deps) {
   S = deps.S;
   showScreen = deps.showScreen;
   getGravityDir = deps.getGravityDir;
+  getMe = deps.getMe || (() => null);
   onSaved = deps.onSaved;
 }
 
 // The cube we are editing right now. SK.skin is changed in place as you tap, so
 // the live preview (which reads SK.skin) shows every change on the next frame.
-const SK = { id: null, name: "", skin: { ...DEFAULT_SKIN } };
+// SK.savedSkin is a COPY of how the cube looked when we opened the editor —
+// that's what we compare against to work out what you're buying. It has to be a
+// copy: if it were the same object, it would change as you tap and everything
+// would look free!
+const SK = { id: null, name: "", skin: { ...DEFAULT_SKIN }, savedSkin: { ...DEFAULT_SKIN } };
 
 // Open the cube editor for a player (real, or a brand-new {id:null,...} one).
 export function openSkinEditor(profile) {
   SK.id = profile.id != null ? profile.id : null;
   SK.name = profile.name || "";
   SK.skin = normalizeSkin(profile.skin);
+  SK.savedSkin = { ...SK.skin };          // a snapshot to price changes against
   document.getElementById("skinTitle").textContent = SK.name ? (SK.name + "'s Cube") : "My Cube";
   buildSkinEditor();
+  updatePriceTag();
   S.screen = "skin";
   showScreen("skinScreen");
   startSkinPreview();
+}
+
+/* ----------------------------------------------------------------
+   THE PRICE TAG. Every time you change something we work out what
+   this cube would cost — only the parts you actually changed — and
+   put it right on the Save button, so there are never any surprises.
+   Changing your mind back makes it free again.
+   ---------------------------------------------------------------- */
+function updatePriceTag() {
+  const saveBtn = document.getElementById("skinSaveBtn");
+  const tag = document.getElementById("skinPrice");
+  if (!saveBtn) return;
+
+  const { items, total } = skinCost(SK.savedSkin, SK.skin);
+
+  if (!havePrices() || total === 0) {
+    saveBtn.textContent = "⇩ Save";
+    saveBtn.disabled = false;
+    if (tag) tag.textContent = havePrices() ? "No changes — free!" : "";
+    return;
+  }
+
+  const purse = balance();
+  if (total > purse) {
+    saveBtn.textContent = "Need " + (total - purse) + " more";
+    saveBtn.disabled = true;
+  } else {
+    saveBtn.textContent = "⇩ Save — " + total + " coins";
+    saveBtn.disabled = false;
+  }
+  // The itemised list, so it's obvious WHY it costs what it costs.
+  if (tag) {
+    tag.textContent = items.map(i => i.part + " " + i.price).join("  ·  ") +
+      "   (you have 💰 " + purse + ")";
+  }
 }
 
 // Build one row of color swatches + a rainbow slider for one skin color.
@@ -57,6 +101,7 @@ function colorRow(label, key, swatches) {
       SK.skin[key] = hex;
       marks.forEach(m => m.classList.remove("selected"));
       sw.classList.add("selected");
+      updatePriceTag();
     };
     marks.push(sw);
     row.appendChild(sw);
@@ -67,6 +112,7 @@ function colorRow(label, key, swatches) {
   slider.oninput = () => {
     SK.skin[key] = hslToHex(Number(slider.value));
     marks.forEach(m => m.classList.remove("selected"));
+    updatePriceTag();
   };
   row.appendChild(slider);
   return row;
@@ -86,6 +132,7 @@ function optionRow(label, key, options, labels, onChange) {
       SK.skin[key] = opt;
       marks.forEach(m => m.classList.remove("selected"));
       b.classList.add("selected");
+      updatePriceTag();
       if (onChange) onChange();
     };
     marks.push(b);
@@ -115,6 +162,7 @@ function buildSkinEditor() {
   emojiInput.oninput = () => {
     const v = emojiInput.value.trim();
     if (v) SK.skin.emoji = normalizeSkin({ emoji: v }).emoji;
+    updatePriceTag();
   };
   emojiRow.appendChild(emojiInput);
 
@@ -196,17 +244,21 @@ function previewDeath() {
   }, 1100);
 }
 
-// Save the cube to the server (creating a new player, or updating one). Same
-// PIN flow as saving a level.
+// Save the cube — which is also BUYING it, if you changed anything.
+// The server adds up the real price and takes the coins; if you can't
+// afford it, it says so kindly and nothing is charged.
 async function saveSkin() {
+  const me = getMe();
+  if (!me) { showToast("Log in first to save your cube!"); return; }
   const body = { name: SK.name, skin: normalizeSkin(SK.skin) };
   try {
-    let saved;
-    if (SK.id != null) saved = await apiWrite("PUT", "/profiles/" + SK.id, body);
-    else saved = await apiWrite("POST", "/profiles", body);
-    showToast("Saved!");
-    await onSaved(saved);   // main.js refreshes the players and goes back to the menu
-  } catch (e) { if (e.message !== "cancelled") showToast(e.message); }
+    const result = await apiWrite("PUT", "/accounts/" + me.id, body);
+    showToast(result.spent > 0 ? "Saved! −" + result.spent + " coins" : "Saved!");
+    // From now on, THIS is the cube we compare against — so tapping Save
+    // twice doesn't charge twice.
+    SK.savedSkin = { ...normalizeSkin(result.account.skin) };
+    await onSaved(result.account);   // main.js updates the purse and goes back
+  } catch (e) { showToast(e.message); }
 }
 
 document.getElementById("skinSaveBtn").onclick = saveSkin;

@@ -11,7 +11,7 @@
 
 import { CONFIG, THEMES } from "../config.js";
 import { parseLevel } from "../game/level.js";
-import { SONGS } from "../music.js";
+import { Music, SONGS } from "../music.js";
 import { apiWrite } from "../api.js";
 import { showToast } from "./toast.js";
 
@@ -294,16 +294,19 @@ document.getElementById("closeImportBtn").onclick = () => document.getElementByI
 async function saveToServer() {
   const body = { name: levelName(), author: ED.author, level: edToText(), song: ED.song, theme: ED.theme };
   try {
+    let created = null;
     if (ED.editingId != null) {
       await apiWrite("PUT", "/levels/" + ED.editingId, body);
     } else {
-      const created = await apiWrite("POST", "/levels", body);
+      created = await apiWrite("POST", "/levels", body);
       ED.editingId = created.id;         // from now on, saving updates this same level
     }
     showToast("Saved!");
-    await onSaved();          // main.js refreshes its level list and the menu
+    // `created` carries the new-level bounty (if any) so main.js can
+    // cheer about it and update the purse.
+    await onSaved(created);   // main.js refreshes its level list and the menu
   } catch (e) {
-    if (e.message !== "cancelled") showToast(e.message);
+    showToast(e.message);
   }
 }
 
