@@ -49,7 +49,7 @@ const PROFILES_FILE = path.join(DATA_DIR, "profiles.json"); // players + their c
 const KEEP_BACKUPS = 200;            // how many old copies of each file to keep
 
 // ---------- Rules for a valid level ----------
-const LEVEL_CHARS = new Set([".", "#", "^", "o", "*", "|", "/", "\\", "=", "-", "p", "U", "s", "@", ">", "<"]);
+const LEVEL_CHARS = new Set([".", "#", "^", "o", "*", "|", "/", "\\", "=", "-", "p", "U", "s", "@", ">", "<", "u", "n"]);
 const MAX_COLS = 500;
 const MAX_ROWS = 30;
 
@@ -130,6 +130,25 @@ const SEED = [
 ........................................................
 ............*...............*...........................
 ........../####\\............/..............|............` },
+  // A gadget showcase: hop the saws, bounce the small pink pad, run up the ramp
+  // and across the = platforms + - bridge, then a @ checkpoint before the last saws.
+  { name: "Gizmo Playground", author: "Built-in", song: 0, level:
+`.....................................................
+..............*.............*...............*........
+...........======...............========.............
+.....................................................
+.....................................................
+..........s.....p......./#===-.......@.....s......|..` },
+  // A portal showcase: a  u  gate flips gravity (you land on the ceiling!), an  n
+  // gate drops you back down, then  >  speeds the world up and  <  slows it again.
+  { name: "Portal Playground", author: "Built-in", song: 1, level:
+`..................*...................*..............
+.....................................................
+.....................................................
+............u...........n............................
+..........*.................*.......>.......<........
+.....................................................
+..............................................|......` },
 ];
 
 /* ================================================================
@@ -235,7 +254,7 @@ function validateLevel(body) {
   for (const row of rows) {
     if (row.length !== width) throw new Error("All rows must be the same length.");
     for (const ch of row) {
-      if (!LEVEL_CHARS.has(ch)) throw new Error("That character is not allowed: \"" + ch + "\". Use only . # ^ o * | / \\ = - p U s @ > <");
+      if (!LEVEL_CHARS.has(ch)) throw new Error("That character is not allowed: \"" + ch + "\". Use only . # ^ o * | / \\ = - p U s @ > < u n");
       if (ch === "|") finishCount++;
     }
   }

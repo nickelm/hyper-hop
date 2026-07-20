@@ -63,6 +63,8 @@ s  saw blade (death; circular hitbox radius CONFIG.SAW_RADIUS*TILE, circle-vs-bo
    restart or level change clears it and restarts music. Small flag, lit once activated)
 >  fast portal   (scroll speed becomes SCROLL_SPEED * CONFIG.FAST_MULT)
 <  slow portal   (scroll speed becomes SCROLL_SPEED * CONFIG.SLOW_MULT)
+u  flip-gravity portal   (gravity points UP: the cube falls upward)
+n  normal-gravity portal (gravity points down again)
 ```
 
 Speed portals (`>` `<`) are full-column gates: crossing the column's midline (at
@@ -70,6 +72,18 @@ any height) sets the scroll speed **absolutely** (not stacking) to the most
 recently passed portal's multiplier. Speed resets to normal only via a portal of
 the other kind, on death (restoring the checkpoint snapshot's speed), or on a full
 restart. Portals never kill.
+
+Gravity portals (`u` `n`) are the same kind of full-column gate and set gravity
+**absolutely** via a single `gravityDir` (+1 down / −1 up) that multiplies gravity
+and mirrors every landing test — floor↔ceiling, block tops↔undersides, and the
+under-sides of `=`/`-` platforms — so there is one code path, not two. `u` flips
+gravity, `n` restores it (hitting `u` twice is harmless). Under flipped gravity an
+implicit ceiling at the top of the grid mirrors the floor; spikes, saws, pads,
+catapults, coins, checkpoints and the finish all still work (pads/catapults push
+toward the current "up"). **Limitation: ramps (`/` `\`) are ignored while gravity
+is flipped** — they do nothing (and still never kill). Gravity direction is part of
+the checkpoint snapshot and resets to normal on a full restart (level start =
+normal).
 
 Jump-through platforms (`=` `-`) are one-way: the cube lands on the top when
 falling, but passes straight through them from below and from the sides, and they
