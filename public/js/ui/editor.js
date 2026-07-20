@@ -34,7 +34,8 @@ const ED = {
   rows: CONFIG.LEVEL_ROWS, cols: 40,
   grid: [],
   tool: "#",
-  cell: 34,                       // on-screen size of one editor cell
+  cell: 24,                       // on-screen size of one editor square (worked out to fit)
+  zoom: 0,                        // 0 = the whole level fits on screen; each step is one 🔍+ tap
   song: 0,                        // which tune (from music.js SONGS) this level plays
   theme: 0,                       // which background theme (from THEMES) this level uses
   editingId: null,                // the server level we're changing (null = a brand-new one)
@@ -54,6 +55,7 @@ function edLoadGrid(parsed) {
   ED.grid = parsed.grid.map(row => row.split(""));
   while (ED.grid.length < CONFIG.LEVEL_ROWS) ED.grid.unshift(Array(ED.cols).fill("."));
   ED.rows = ED.grid.length;
+  ED.zoom = 0;                    // start by showing the whole level
 }
 
 // The editor palette. Tiles are shown in groups; a { sep: true } entry leaves a
@@ -106,7 +108,44 @@ TOOLS.forEach(t => {
 
 const eCanvas = document.getElementById("editorCanvas");
 const eCtx = eCanvas.getContext("2d");
+const eWrap = document.getElementById("editorGridWrap");
+
+/* ----------------------------------------------------------------
+   HOW BIG IS ONE SQUARE ON SCREEN?
+   Tablets are all different sizes, so we don't pick a number — we
+   work it out. At zoom 0 the WHOLE level is shrunk to fit the space
+   we have, so it can never be cut off. Each tap on  🔍+  makes the
+   squares bigger (and then the grid is bigger than the screen, so
+   you can slide it around with a finger).
+   ---------------------------------------------------------------- */
+const MIN_CELL = 8, MAX_CELL = 40;
+const ZOOM_STEP = 1.3;
+
+function fitCell() {
+  // How much room the grid has. If the editor isn't on screen yet we
+  // can't measure it, so fall back to a sensible middle size.
+  const availW = eWrap.clientWidth - 20, availH = eWrap.clientHeight - 20;
+  // (written this way so a missing measurement — NaN — falls back too)
+  if (!(availW > 0) || !(availH > 0)) return 24;
+  return Math.min(availW / ED.cols, availH / ED.rows);   // fit BOTH ways
+}
+function computeCell() {
+  const c = fitCell() * Math.pow(ZOOM_STEP, ED.zoom);
+  return Math.max(MIN_CELL, Math.min(MAX_CELL, Math.floor(c)));
+}
+// Is the grid actually bigger than the space we have? (Not just "did they
+// zoom in" — a very wide level can spill over even at zoom 0.) If it spills,
+// a finger has to SLIDE it around instead of drawing on it.
+let scrollable = false;
+function canScroll() { return scrollable; }
+
 function drawEditor() {
+  ED.cell = computeCell();
+  scrollable = (ED.cols * ED.cell > eWrap.clientWidth - 20) ||
+               (ED.rows * ED.cell > eWrap.clientHeight - 20);
+  // When the whole level fits, a finger draws. When it doesn't, a finger
+  // slides the grid around and a TAP draws one square.
+  eCanvas.style.touchAction = scrollable ? "pan-x pan-y" : "none";
   const c = ED.cell;
   eCanvas.width = ED.cols * c; eCanvas.height = ED.rows * c;
   eCtx.fillStyle = "#1a1a38"; eCtx.fillRect(0, 0, eCanvas.width, eCanvas.height);
@@ -181,9 +220,35 @@ function edPaint(e) {
   drawEditor();
 }
 let painting = false;
-eCanvas.addEventListener("pointerdown", e => { painting = true; edPaint(e); e.stopPropagation(); });
-eCanvas.addEventListener("pointermove", e => { if (painting) edPaint(e); });
+let downAt = null, dragged = false;      // for telling a TAP apart from a slide
+eCanvas.addEventListener("pointerdown", e => {
+  e.stopPropagation();
+  downAt = { x: e.clientX, y: e.clientY }; dragged = false;
+  if (canScroll()) return;               // zoomed in: wait and see if it's a slide
+  painting = true; edPaint(e);           // fits on screen: draw straight away
+});
+eCanvas.addEventListener("pointermove", e => {
+  if (painting) { edPaint(e); return; }
+  if (downAt && Math.abs(e.clientX - downAt.x) + Math.abs(e.clientY - downAt.y) > 8) dragged = true;
+});
+eCanvas.addEventListener("pointerup", e => {
+  if (!painting && downAt && !dragged) edPaint(e);   // a tap, not a slide: draw one square
+  downAt = null;
+});
+// The browser takes the gesture over when it starts scrolling — stop drawing.
+eCanvas.addEventListener("pointercancel", () => { painting = false; downAt = null; });
 window.addEventListener("pointerup", () => painting = false);
+
+// Zoom buttons, and redraw if the tablet is turned around.
+document.getElementById("zoomInBtn").onclick = () => {
+  if (ED.zoom >= 6 || ED.cell >= MAX_CELL) return;
+  ED.zoom++; drawEditor();
+};
+document.getElementById("zoomOutBtn").onclick = () => {
+  if (ED.zoom <= 0) return;              // 0 = the whole level already fits
+  ED.zoom--; drawEditor();
+};
+window.addEventListener("resize", () => { if (S && S.screen === "editor") drawEditor(); });
 
 document.getElementById("widerBtn").onclick = () => {
   ED.cols += 10; ED.grid.forEach(row => { for (let i = 0; i < 10; i++) row.push("."); });

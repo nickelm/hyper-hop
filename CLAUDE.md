@@ -142,6 +142,16 @@ callback, and `simState` exposes it as `state.holding`. `input.js` also releases
 on `pointercancel` and `blur`, so a finger sliding off a tablet cannot leave the
 rocket thrusting by itself.
 
+**The editor sizes itself to the tablet.** `ED.cell` is never a fixed number — it
+is worked out each redraw so the *whole* level fits the space available
+(`fitCell()`), with 🔍−/🔍+ zoom steps on top. This matters because the grid is
+14 rows tall now and a tablet's editor area is only a few hundred pixels.
+Whenever the grid does overflow, `editor.js` switches the canvas's `touch-action`
+from `none` to `pan-x pan-y` so a finger **slides** it and a **tap** paints one
+square; when everything fits, dragging paints as it always did. Don't put a fixed
+`touch-action` back on `#editorCanvas` — a `touch-action: none` canvas filling a
+scrollable box makes the box impossible to scroll on a tablet.
+
 Jump-through platforms (`=` `-`) are one-way: the cube lands on the top when
 falling, but passes straight through them from below and from the sides, and they
 never kill. The `-` bridge is a `=` that fades out after the cube runs past it
@@ -185,7 +195,7 @@ padded, row indices, `"col,row"` coin keys and stored level strings are unaffect
 | `js/game/render.js` | Drawing a frame: sky, ground, every tile, HUD, and the win/death overlays. |
 | `js/game/player.js` | How a cube *looks*: `drawPlayer`, `normalizeSkin`, `hslToHex`. Shared by the game, the previews and the picker buttons. |
 | `js/game/effects.js` | The trail and the death explosion (`drawTrail`, `spawnExplosion`, `renderParticles`). |
-| `js/ui/editor.js` | The level editor: paint grid, palette, tune/theme buttons, test-play, copy/paste, save. |
+| `js/ui/editor.js` | The level editor: paint grid, palette, tune/theme buttons, zoom, test-play, copy/paste, save. |
 | `js/ui/skins.js` | The cube editor and its little live-preview cube. |
 | `js/ui/settings.js` | The Control Panel: sliders, colors, switches, "Save/Reset for everyone". |
 | `js/ui/toast.js` | The little "Saved!" pop-up. |

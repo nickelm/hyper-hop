@@ -102,8 +102,10 @@
     background: #1e1e40; border: 3px solid #555a8a; border-radius: 10px;
     padding: 6px 12px; cursor: pointer; }
   .optBtn.selected { border-color: #7dff5e; background: #2a4a2a; }
-  #editorGridWrap { flex: 1; width: 100%; overflow: auto; touch-action: pan-x pan-y;
-    padding: 10px; }
+  #editorGridWrap { flex: 1; width: 100%; min-height: 0; overflow: auto; touch-action: pan-x pan-y;
+    padding: 10px; -webkit-overflow-scrolling: touch; }
+  /* touch-action is set from editor.js: "none" (a finger draws) when the whole
+     level fits, "pan-x pan-y" (a finger slides) once you've zoomed in. */
   #editorCanvas { background: #1a1a38; border-radius: 8px; touch-action: none; }
   #editorBottom { display: flex; gap: 8px; padding: 10px; flex-wrap: wrap; justify-content: center; }
   #exportBox, #importBox { position: absolute; inset: 8%; background: #10102a; border: 4px solid #3ec6ff;
@@ -235,6 +237,8 @@
     <button class="btn small" id="themeBtn">&#127912; Theme</button>
     <button class="btn small" id="widerBtn">Wider +</button>
     <button class="btn small" id="narrowBtn">Shorter &minus;</button>
+    <button class="btn small" id="zoomOutBtn" title="Show more">&#128269;&minus;</button>
+    <button class="btn small" id="zoomInBtn" title="Zoom in closer">&#128269;+</button>
   </div>
   <div id="editorGridWrap"><canvas id="editorCanvas"></canvas></div>
   <div id="editorBottom">
