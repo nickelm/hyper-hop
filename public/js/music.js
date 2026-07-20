@@ -23,14 +23,14 @@
          BPM 180 -> 3 tiles per beat  (fast)
    ================================================================ */
 
-const MUSIC = {
+export const MUSIC = {
   ON: true,          // master switch for ALL music. false = total silence
   VOLUME: 0.5,       // 0 = silent, 1 = loud (the game can change this live)
 };
 
 // The jukebox! Each song is a little band of tracks that play at once.
 // Levels choose a song by its position in this list (0 = the first one).
-const SONGS = [
+export const SONGS = [
 
   {
     name: "Hyper Hop",          // the classic theme — bright and bouncy (E minor)
@@ -113,7 +113,7 @@ const SONGS = [
    the beat never wobbles even when the game is working hard.
    ================================================================ */
 
-const Music = (() => {
+export const Music = (() => {
   let ctx = null, master = null;
   let timer = null, nextStepTime = 0, step = 0;
   let song = SONGS[0];                            // the song playing right now
