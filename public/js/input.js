@@ -15,11 +15,16 @@ export function initInput(deps) {
   // Is a finger (or the space bar) being held down right now?
   let holding = false;
 
+  // Tapping a button, a whole screen that isn't the game, or any pop-up
+  // must NOT make the cube jump. Every new pop-up belongs in this list.
+  const NOT_A_JUMP = [
+    "button", "#loginScreen", "#editorScreen", "#skinScreen", "#controlPanel",
+    "#exportBox", "#importBox", "#saveBox", "#passwordBox", "#confirmBox",
+    "#nameBox", "#scoresBox", "#boardBox",
+  ];
+
   function pressDown(e) {
-    if (e.target.closest("button") || e.target.closest("#editorScreen") || e.target.closest("#skinScreen") ||
-        e.target.closest("#exportBox") ||
-        e.target.closest("#importBox") || e.target.closest("#saveBox") || e.target.closest("#pinBox") ||
-        e.target.closest("#confirmBox") || e.target.closest("#controlPanel")) return;
+    if (NOT_A_JUMP.some(what => e.target.closest(what))) return;
     holding = true;
     if (S.screen === "game") {
       const player = getPlayer();

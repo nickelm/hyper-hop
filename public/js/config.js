@@ -70,6 +70,13 @@ export const CONFIG = {
 
   // ---------- HIGH SCORES ----------
   LEADERBOARD_TOP: 5,     // how many players to show on the leaderboard (win screen + 📊 list)
+
+  // ---------- COINS ----------
+  // These are only about how coins LOOK. What things COST lives on the
+  // server, in data/prices.json — so nobody can give themselves a
+  // million coins by changing this file in their browser. 😉
+  COIN_SILVER_COLOR: "#c0c8d8",  // a coin you already earned once: still fun to grab, but no new coins
+  COIN_HUD_COLOR: "#ffd700",     // your purse, in the corner while you play
 };
 
 // A saved copy of the numbers above, so the "Reset to defaults"

@@ -9,10 +9,15 @@ who own level design and parameter tuning. It plays in iPad and Android tablet
 browsers.
 
 It is a small **client–server app**: a vanilla HTML/CSS/JS game (in `public/`)
-talking to a tiny **Node + Express** server that stores everyone's levels, players
-and shared settings in flat JSON files. This lets the kids save levels and settings
-straight from their tablets, no laptop or git in the loop. It runs on a DigitalOcean
-droplet (see `deploy/`).
+talking to a tiny **Node + Express** server that stores everyone's levels,
+accounts, coins and shared settings in flat JSON files. This lets the kids save
+levels and settings straight from their tablets, no laptop or git in the loop. It
+runs on a DigitalOcean droplet (see `deploy/`).
+
+Everyone has an **account** with a password, and playing earns **coins** that buy
+cosmetic bits for your cube. The security is family-grade — but the fundamentals
+are done properly: hashed passwords, an httpOnly session cookie, and every
+permission checked on the server, never just in the buttons.
 
 The code is split into small **ES modules** — one job per file, no build step.
 
@@ -25,20 +30,28 @@ The code is split into small **ES modules** — one job per file, no build step.
 2. **All tunables live in `CONFIG`** (`public/js/config.js`). Never hardcode a magic
    number in the engine if it could be a named constant there. When adding a
    feature, add its parameters to CONFIG with a kid-friendly comment.
+   **The one exception is money.** What things *cost* lives in `data/prices.json`
+   on the server (hand-editable, hot-reloaded — the same spirit as CONFIG, just
+   server-side), because `config.js` is sent to the tablets and anyone could edit
+   it in their browser to hand themselves a million coins. CONFIG keeps only how
+   coins *look* (`COIN_SILVER_COLOR`, `COIN_HUD_COLOR`).
 3. **The client stays vanilla — no build step, no frameworks, no client
    dependencies.** Everything in `public/` is plain HTML/CSS/JS with canvas
    rendering, loaded as native ES modules. Because it uses modules it must be
    **served over HTTP** (`npm start`), not opened as a `file://` page. The *server*
    is allowed exactly one dependency, Express, and no build step either — plain
-   `node server/server.js`.
-4. **No client storage, with one exception.** Levels, players and shared settings
-   live on the server (`data/*.json`) and are reached through the API below — never
-   in `localStorage`/`sessionStorage`. The family PIN is held only in a JS variable
-   for the session (inside `js/api.js`). The **one** allowed per-device value is the
-   **player name**, stored in `localStorage` under `hh_player`: it's this tablet's
-   identity (whose scores these are, who's the author), not shareable data, so it
-   can't live on the server. The editor's "Copy code" export stays as a manual
-   backup path.
+   `node server/server.js`. Passwords use Node's built-in `crypto` (scrypt) and
+   cookies are parsed by hand (`lib/cookies.js`) rather than adding a package.
+4. **The server owns everything that matters; the tablet owns almost nothing.**
+   Levels, accounts, coins, scores and shared settings live on the server
+   (`data/*.json`) and are reached through the API below. Your login is an
+   **httpOnly cookie** — the game's own JavaScript cannot read it, so nothing on
+   the page can steal it. **Coins are server-authoritative:** the client reports
+   what it collected, the server decides what it's worth.
+   `localStorage` is allowed for **convenience only**, and currently holds exactly
+   one thing: `hh_last_account`, the name to preselect on the login screen. Never
+   put auth tokens, coins, or anything gameplay-authoritative there. The editor's
+   "Copy code" export stays as a manual backup path.
 5. **Touch-first.** Every feature must work with taps on a tablet. Keyboard support
    is secondary. Keep `touch-action: none` and pointer events intact.
 6. **New code goes in the module that owns that concern.** If a change is about
@@ -123,8 +136,10 @@ plane. Rows are top-to-bottom; all rows in a level must be the same length.
 | ---- | ------------ |
 | `index.html` | Markup + styles only. One `<script type="module" src="js/main.js">`. No inline JS. |
 | `js/config.js` | `CONFIG` (every tunable number), `DEFAULTS`, `THEMES`, and the cube-skin option lists. The kids' control panel. |
-| `js/main.js` | The app shell: game state, starting/resetting a level, checkpoints, the game loop, the menu + player picker, and startup. Wires every other module together. |
-| `js/api.js` | Every `fetch`: `apiGet`, `apiWrite` (family PIN + one retry), `apiPost` (scores, no PIN). Owns the PIN and the PIN / "are you sure?" pop-ups. |
+| `js/main.js` | The app shell: game state, starting/resetting a level, checkpoints, the game loop, the menu bar, the trophy board, and startup. Wires every other module together. |
+| `js/api.js` | Every `fetch`: `apiGet`, `apiWrite`, `apiPost`, `apiDelete`, plus the "are you sure?" pop-up. Sends the login cookie and bounces you to the login screen on a 401. |
+| `js/ui/login.js` | The login screen: tap your cube, type your password, claim an unclaimed name, make a new player, log out. Also `may()` — which buttons your role should see. |
+| `js/economy.js` | Coins: your purse, telling the server about a finished run, which coins you've already been paid for, and what a cube change costs. |
 | `js/input.js` | Taps and keys → actions: jump, hold-to-keep-jumping, Escape, Z/X checkpoints, in-game buttons. |
 | `js/music.js` | The chiptune synth (`Music`) and the `SONGS` list. |
 | `js/game/level.js` | The level format: `parseLevel`, the tile legend, and the `tileAt` / `cellTop` lookups. |
@@ -141,26 +156,44 @@ plane. Rows are top-to-bottom; all rows in a level must be the same length.
 
 | File | What it owns |
 | ---- | ------------ |
-| `server.js` | Bootstrap: env vars, static files, mounts the routers, starts listening. |
-| `routes/levels.js` | `/api/levels` — list, create, reorder, update, delete. |
-| `routes/profiles.js` | `/api/profiles` — the players and their cube skins. |
+| `server.js` | Bootstrap: env vars, static files, mounts the routers, the JSON 404/error handlers, starts listening. |
+| `routes/auth.js` | `/api/me`, `/api/accounts` (list + signup), `/api/login`, `/api/set-password`, `/api/logout`. Owns the 5-tries lockout. |
+| `routes/levels.js` | `/api/levels` — list, create (+ bounty), reorder, update, delete. |
+| `routes/accounts.js` | `/api/accounts/:id` — change your name/cube. **This is the shop:** it prices what changed and takes the coins. |
+| `routes/runs.js` | `/api/runs` — "I finished a level with these coins" → coins credited. |
 | `routes/scores.js` | `/api/scores` — best % per player per level. |
-| `routes/settings.js` | `/api/settings` — the shared "for everyone" numbers. |
-| `lib/storage.js` | The JSON files: read, write-with-backup, backup rotation, first-run seeding. The only place that touches disk. |
-| `lib/validate.js` | Everything a tablet sends is checked here. **The allowed tile list lives here, once.** |
-| `lib/auth.js` | The family-PIN and READ_ONLY guards. |
+| `routes/leaderboard.js` | `/api/leaderboard` — everyone ranked by coins earned ever. |
+| `routes/prices.js` | `/api/prices` — the shop price list, so the Save button can show a price. |
+| `routes/settings.js` | `/api/settings` — the shared "for everyone" numbers (admin only). |
+| `lib/storage.js` | The JSON files: the file table, read, `updateJson`, write-with-backup, backup rotation, first-run seeding. The only place that touches disk. |
+| `lib/validate.js` | Everything a tablet sends is checked here. **The allowed tile list lives here, once**, and so does `coinKeysFor` (where a level's coins are). |
+| `lib/auth.js` | **The one place that decides who may do what:** roles, `can()`, the login guards, and `publicAccount`/`meView` (the only way an account is sent to a tablet). |
+| `lib/passwords.js` | Scrambling and checking passwords (scrypt, from Node's own `crypto`). |
+| `lib/sessions.js` | Who's logged in. Stores a *fingerprint* of each token, never the token. |
+| `lib/cookies.js` | Reading and writing the login cookie by hand (httpOnly, SameSite=Lax). |
+| `lib/prices.js` | The price list, re-read whenever `data/prices.json` changes on disk. |
+| `lib/migrate.js` | The one-time move from the old `profiles.json` to `accounts.json`. |
+| `lib/errors.js` | `NotFound` (404) and `NotAllowed` (403), so routes can `throw` and still answer properly. |
 
 **Other:**
 
 - `data/` — runtime state, created/seeded on first run and **gitignored**:
-  - `levels.json` — `{id, name, author, level, song, theme, updatedAt}`. Array order
-    is the play order (changed via the reorder endpoint).
+  - `levels.json` — `{id, name, author, level, song, theme, ownerId, updatedAt}`.
+    Array order is the play order (changed via the reorder endpoint). `ownerId` is
+    who may edit it; `null` means admin-only (the built-in levels).
   - `settings.json` — CONFIG overrides saved "for everyone" (a flat subset).
-  - `scores.json` — `{levelId, player, percent, updatedAt}`: each player's **best %
-    completion** per level (100 = finished). One row per (level, player); the server
-    keeps the max.
-  - `profiles.json` — `{id, name, skin, updatedAt}`: the named players and their
-    **cosmetic cube skins**.
+  - `scores.json` — `{levelId, accountId, player, percent, updatedAt}`: each
+    player's **best % completion** per level (100 = finished). One row per
+    (level, player); the server keeps the max. `accountId` may be `null` on rows
+    saved before accounts existed — the name is the fallback.
+  - `accounts.json` — **the players.** See "Accounts, jobs and coins" below.
+  - `sessions.json` — who's logged in. Holds a *fingerprint* of each login token,
+    never the token itself, so an old backup is not a pile of working keys.
+  - `prices.json` — **the coin control panel.** Hand-edit it and the shop notices
+    immediately, no restart.
+  - `meta.json` — the game's own notes: `nextLevelId` (never reused) and when the
+    one-time move to accounts happened.
+  - `profiles.json.migrated` — the old players file, kept but never read again.
   - `backups/` — timestamped copies of the above, newest 200 kept per file.
 - `test/` — the safety net (see Testing below).
 - `deploy/` — `hyper-hop.service` (systemd), `Caddyfile` (HTTPS reverse proxy),
@@ -197,15 +230,84 @@ every level in order (adventure mode).
 for everything under `public/js/`, so a refresh on iPad Safari always picks up new
 code. If you add client files outside `js/`, they will NOT get that header.
 
-**Players & skins.** The menu shows a "Who's playing?" row: one cube button per
-saved profile plus "+ New player". Picking a profile is the identity layer over the
-per-device `hh_player` name — it sets `currentProfile` (its skin is used in-game)
-**and** the name used for scores + level authorship (also written to `hh_player`),
-so the cube you see and the name on the leaderboard always match. No profile chosen
-= the default cube + today's name-only behavior. A tablet that already has an
-`hh_player` name but no matching profile shows that name as a *provisional* cube
-(default skin); it becomes a real server profile the first time it's saved (writes
-are PIN-gated, so nothing is created on load). "Edit my cube" opens the skin editor.
+**One more rule, about changing a saved file.** Every mutation goes through
+`updateJson(file, change)` in `lib/storage.js`, which reads, changes and saves in
+one uninterrupted go. **The `change` callback must never `await`.** Node does one
+thing at a time and `fs.*Sync` never pauses, so a synchronous read-modify-write
+can't be interrupted — but one stray `await` in the middle reopens the gap and two
+tablets finishing a level at the same moment can wipe out each other's coins.
+Return the `SKIP_SAVE` sentinel to mean "nothing changed, don't write" — that's
+what keeps the backups folder from filling up with 200 identical copies every time
+someone replays a level.
+
+## Accounts, jobs and coins
+
+**Everybody has an account** and logs in with a password (minimum 4 characters —
+these are 9-year-olds). A row in `accounts.json` looks like:
+
+```
+{ id, name, passwordHash|null, role, extraPerms: [],
+  skin: {...}, coins, coinsEarnedTotal,
+  collectedCoins: { "<levelId>": ["col,row", ...] },   // coins already paid for
+  bountiesPaid,                                        // how many level bounties earned
+  createdAt, updatedAt }
+```
+
+`passwordHash: null` means **unclaimed** — the name exists but nobody has picked a
+password for it yet. The login screen shows those with a "tap to claim" hint, and
+tapping one offers "pick a password so this name is yours". That's how everyone who
+played before accounts existed keeps their scores and their levels.
+
+**The three jobs.** Change somebody's `role` by hand in `data/accounts.json` — it
+takes effect on their next request, no restart. There is deliberately no button
+for it.
+
+| role | may |
+| ---- | --- |
+| `player` | make levels; edit/delete **their own**; edit their own name + cube; report runs |
+| `editor` | everything a player may, plus edit/delete **anybody's** level |
+| `admin` | everything an editor may, plus world settings, reordering levels, and editing any account |
+
+`extraPerms` is a list of extra powers for one person, so you can give a kid
+`"level.reorder"` without making them a full admin. **`lib/auth.js` is the only
+place that decides any of this** (`can(account, action, thing)`); the client's
+`may()` in `js/ui/login.js` mirrors it purely to hide buttons — if you change one,
+change the other, but the server is the one that really decides.
+
+**Coins are server-authoritative.** The client says which coins it picked up; the
+server checks them against the level's real coin positions and against what you've
+already been paid for, then credits the difference. So:
+
+- Coins pay **once**. Replaying a level is still fun, but the coins you've already
+  earned draw **silver** and add nothing.
+- Finishing matters: an unfinished run credits nothing (and writes nothing).
+- Making a **brand-new** level pays `levelCreateBounty`. This is counted, not
+  listed by id: you're paid when you own more levels than you've been paid for —
+  so making a level, deleting it and making it again earns nothing.
+- The **trophy board** ranks by `coinsEarnedTotal` (lifetime earnings), never by
+  the balance in your purse, so buying a cube can't cost you your place. If it
+  did, nobody would ever buy anything.
+
+**The shop.** Saving your cube is also buying it: the server compares the cube you
+sent with the one it has saved and charges for the parts that actually *changed*,
+at the prices in `data/prices.json`. Keeping a part the same is free, so **the
+default green cube is free forever**, and changing your mind back costs nothing.
+The Save button shows the live price ("Save — 45 coins") and goes to
+"Need 20 more" when you can't afford it. Prices are hand-edited in
+`data/prices.json` and picked up without a restart:
+
+```
+{ "startingCoins": 50, "coinValue": 1, "levelCreateBounty": 25,
+  "skin": { "bodyColor": 5, "outlineColor": 5, "faceColor": 5,
+            "shape": 20, "face": 10, "emoji": 15, "trail": 25, "explosion": 25 } }
+```
+
+**A trap worth knowing about.** `validateAccountEdit` returns a *patch* (only the
+fields that were sent) and the route **merges** it onto the saved account. It used
+to rebuild the record from scratch, which would now silently wipe out everybody's
+password, coins and role every time they saved their cube. The same applies to
+levels and `ownerId`. There's a tripwire in `routes/accounts.js` that throws if a
+merge ever loses `passwordHash` or `coinsEarnedTotal` — leave it there.
 
 ## Skins
 
@@ -242,51 +344,63 @@ skin editor is a third full screen (`#skinScreen`), reached from the picker.
 
 ## The API
 
-All reads are open. All **mutations require the header `X-Family-Pin`** matching the
-server's `FAMILY_PIN` env var, and are refused with a friendly 403 when
-`READ_ONLY=true`.
+All reads are open. Every **mutation needs you to be logged in** (the browser sends
+the `hh_session` cookie automatically) *and* to be allowed to do that particular
+thing — see `can()` in `lib/auth.js`. Everything that changes something is refused
+with a friendly 403 when `READ_ONLY=true`.
 
-| Method | Path                | What it does                          |
-| ------ | ------------------- | ------------------------------------- |
-| GET    | `/api/levels`       | all levels                            |
-| POST   | `/api/levels`       | create a level (server assigns `id`)  |
-| PUT    | `/api/levels/order` | reorder all levels (send `{order:[ids]}`) |
-| PUT    | `/api/levels/:id`   | update a level                        |
-| DELETE | `/api/levels/:id`   | delete a level                        |
-| GET    | `/api/settings`     | current CONFIG overrides              |
-| PUT    | `/api/settings`     | replace CONFIG overrides              |
-| GET    | `/api/scores`       | all high scores                       |
-| POST   | `/api/scores`       | save a `{levelId, player, percent}` best (see note) |
-| GET    | `/api/profiles`     | all player profiles                   |
-| POST   | `/api/profiles`     | create a profile (server assigns `id`) |
-| PUT    | `/api/profiles/:id` | update a profile's name and/or skin   |
-| DELETE | `/api/profiles/:id` | delete a profile                      |
+| Method | Path                | Who                | What it does                          |
+| ------ | ------------------- | ------------------ | ------------------------------------- |
+| GET    | `/api/me`           | anyone             | who am I? (`null` if nobody, always 200) |
+| GET    | `/api/accounts`     | anyone             | everyone's name + cube, for the login screen |
+| POST   | `/api/accounts`     | anyone             | make a new player `{name, password}` and log in |
+| POST   | `/api/login`        | anyone             | `{name, password}` → sets the cookie   |
+| POST   | `/api/set-password` | anyone             | claim a name that has no password yet  |
+| POST   | `/api/logout`       | anyone             | forget this login                      |
+| PUT    | `/api/accounts/:id` | yourself / admin   | change your name and/or cube — **this is the shop** |
+| GET    | `/api/levels`       | anyone             | all levels                            |
+| POST   | `/api/levels`       | `level.create`     | create a level (+ the new-level bounty) |
+| PUT    | `/api/levels/order` | `level.reorder`    | reorder all levels (send `{order:[ids]}`) |
+| PUT    | `/api/levels/:id`   | owner / editor     | update a level                        |
+| DELETE | `/api/levels/:id`   | owner / editor     | delete a level                        |
+| GET    | `/api/scores`       | anyone             | all high scores                       |
+| POST   | `/api/scores`       | logged in          | save a `{levelId, percent}` best (see note) |
+| POST   | `/api/runs`         | logged in          | `{levelId, collectedCoinKeys, completed}` → `{credited, balance}` |
+| GET    | `/api/leaderboard`  | anyone             | everyone ranked by coins earned ever   |
+| GET    | `/api/prices`       | anyone             | the shop price list                    |
+| GET    | `/api/settings`     | anyone             | current CONFIG overrides              |
+| PUT    | `/api/settings`     | `settings.edit`    | replace CONFIG overrides (admin)      |
 
-**Scores are the one PIN-free write.** Kids play (and beat their best) constantly,
-so saving a score needs no `X-Family-Pin` — but it's still refused when
-`READ_ONLY=true`. The server only writes when a score beats that player's old best,
-so backup churn stays low.
+**Logging in still works when `READ_ONLY=true`** — you can come in and play, you
+just can't change anything. (It does write `sessions.json`; that's the one write
+allowed while frozen, and it's commented as such.)
+
+**Scores never say who they're for.** The tablet sends only the level and the
+percent; the server puts *your* name on it, from the cookie. The server only writes
+when a score beats that player's old best, so backup churn stays low.
+
+**Passwords.** Scrambled with scrypt from Node's built-in `crypto`
+(`lib/passwords.js`), stored as `scrypt$N$r$p$salt$hash` so the settings can change
+later, and compared with `timingSafeEqual`. Five wrong guesses locks that name for
+60 seconds (in memory only — it forgets on restart). A wrong name and a wrong
+password give the *same* message, so guessing can't discover who exists.
 
 Server-side level validation (`lib/validate.js`, returns clear messages): only the
 characters `. # ^ o * | / \ = - p U s @ > < u n`, all rows equal length, at most one
 `|`, ≤ 500 columns, ≤ 30 rows. The allowed-character list is defined **once**
 (`LEVEL_CHARS`) and the error message is generated from it, so the two can't drift.
 
-Server-side profile validation (`validateProfile`/`cleanSkin`, clear messages):
-`name` 1–20 characters; colors must match `#rrggbb`; `shape`/`face`/`trail`/
-`explosion` must be from the enums above; `emoji` at most **one emoji grapheme**
-(counted with `Intl.Segmenter`, so 👍🏽 / 🇸🇪 / 👨‍👩‍👧 count as one; a 50-char
-"emoji" is rejected). Unknown extra skin fields are **stripped, not rejected**
-(forward-compatible), and a missing/odd non-color field falls back to its default.
+Server-side account validation (`validateAccountEdit`/`cleanSkin`, clear messages):
+`name` 1–20 characters and **unique** (ignoring capitals); colors must match
+`#rrggbb`; `shape`/`face`/`trail`/`explosion` must be from the enums above; `emoji`
+at most **one emoji grapheme** (counted with `Intl.Segmenter`, so 👍🏽 / 🇸🇪 /
+👨‍👩‍👧 count as one; a 50-char "emoji" is rejected). Unknown extra skin fields are
+**stripped, not rejected** (forward-compatible), and a missing/odd non-color field
+falls back to its default. `validateAccountEdit` is an **allow-list**, so a tablet
+sending `{coins: 999999, role: "admin"}` simply has those ignored.
 
-Env vars: `PORT` (default 3000), `FAMILY_PIN` (default `1234` for local dev, with a
-warning — always set a real one in production), `READ_ONLY` (`true` freezes writes).
-
-**Known gap:** `KNOWN_SETTING_KEYS` in `lib/validate.js` (what "Save for everyone"
-accepts) has not been updated for the newer tunables — `SMALL_PAD_POWER`,
-`CATAPULT_POWER`, `FAST_MULT`, `SLOW_MULT`, `SAW_RADIUS` and the new colors. They
-can be changed in the Control Panel for this visit, but not shared. Add them when
-you want them shareable.
+Env vars: `PORT` (default 3000) and `READ_ONLY` (`true` freezes writes). There is
+**no server password any more** — everybody has their own account.
 
 ## Testing
 
@@ -299,21 +413,41 @@ Two automatic checks, both run by `npm test`:
   regenerate them (`node test/golden.js`) when you MEANT to change the game.
 - **`test/boot.js` — does the game still hold together?** Loads the real modules with
   a pretend browser and actually runs them: plays a level to the finish and dies on
-  another (so the win and death screens draw), then opens the menu, player picker,
-  cube editor and level editor. It doesn't look at pixels — it catches *missing*
-  things: a bad import path, a renamed export, or a leftover reference to a variable
-  that now lives in another file.
+  another (so the win and death screens draw), then opens the menu bar, login
+  screen, trophy board, cube editor and level editor. It then **runs the whole
+  thing again in a fresh process with nobody logged in** (`HH_BOOT_LOGGED_OUT=1`),
+  so the login screen is exercised too. It doesn't look at pixels — it catches
+  *missing* things: a bad import path, a renamed export, or a leftover reference to
+  a variable that now lives in another file.
+
+  Two things about it are load-bearing. Its pretend `fetch` answers each `/api/…`
+  address with the **shape** the real server sends (an object for `/me`, a list for
+  `/levels`), because a stub that says `[]` to everything quietly turns `me.coins`
+  into `undefined` and hides real mistakes. And `init()` in `main.js` must **never
+  `await` a pop-up** — pop-ups only ever open from a tap. Against the pretend
+  browser a pop-up promise never resolves, so an awaited login prompt at start-up
+  would hang forever *and* look like a pass.
 
 ## Workflow
 
-- Run locally with `npm install` then `npm start` (or
-  `FAMILY_PIN=1234 node server/server.js`), and open `http://localhost:3000`. During
-  sessions the kids reach the laptop over the LAN (`http://<laptop-ip>:3000`);
-  between sessions they use the droplet URL.
+- Run locally with `npm install` then `npm start`, and open
+  `http://localhost:3000`. During sessions the kids reach the laptop over the LAN
+  (`http://<laptop-ip>:3000`); between sessions they use the droplet URL.
+- Everyone taps their name on the login screen and types their password. The first
+  time (or for a name that came across from the old players file) it asks them to
+  **pick** a password instead. A login lasts 90 days and survives a server restart.
 - Kids build levels in the in-game editor and tap **Save to server** (it asks for a
-  name + author once, then the family PIN once per session). Shared tuning is saved
-  from the Control Panel's **Save for everyone**. Both persist server-side and are
-  backed up automatically — no git round-trip needed for levels.
+  name + author once). Shared tuning is saved from the Control Panel's **Save for
+  everyone** — an admin-only button, so it's hidden for the kids. Everything
+  persists server-side and is backed up automatically — no git round-trip needed.
+- **Grown-up jobs, done by hand in `data/`. None of them need a restart** — the
+  server re-reads these files as it goes (the person should reload the page to see
+  their new buttons, but the server enforces the change immediately):
+  - give somebody a different job → change their `"role"` in `accounts.json`
+    (`player` / `editor` / `admin`), or add one power to `"extraPerms"`;
+  - change what things cost → edit `prices.json`;
+  - forgotten password → set that account's `"passwordHash"` back to `null` and
+    they can claim it again with a new one.
 - When the kids are present, explain changes as you make them; small readable
   diffs beat clever refactors.
 
@@ -325,18 +459,47 @@ Two automatic checks, both run by `npm test`:
 - Jump, pad bounce, spike death, coin pickup, and finish all work by tap alone.
 - The newer tiles behave: saw, small pad, catapult, `@` checkpoint respawn, speed
   portals, and a gravity flip (landing on the ceiling) and back.
-- Save to server, Edit, and Save for everyone work by touch; a wrong PIN re-prompts.
+- Save to server and Edit work by touch. Save for everyone works as an admin and
+  is hidden for a `player`.
 - Picking a level theme (🎨 in the editor) changes its background; it survives a save
   and reopen; a "Default"-theme level still follows the Control Panel colors.
 - Reorder (▲/▼), delete (🗑 with the "are you sure?" pop-up), and **Play All**
   (adventure mode) all work by touch; reorder/delete persist after a reload.
-- `READ_ONLY=true` refuses writes with the friendly message; reads still work.
-- With **no profile chosen**, the cube looks pixel-identical to before (default look).
+- `READ_ONLY=true` refuses writes with the friendly message; **logging in and
+  reading still work**; balances are unchanged.
 - The cube editor: each shape/face/trail/explosion changes the live preview; tap the
   preview to jump and **💀 Try it out** fires the explosion; the emoji face renders
-  (check iPad Safari + Android Chrome); Save asks the PIN once and survives a reload.
-- Two profiles made on two browsers both show in "Who's playing?" after a reload;
-  picking one shows its cube in-game and its name on the scoreboard/as author.
+  (check iPad Safari + Android Chrome).
+- Two accounts made on two browsers both show on the login screen after a reload;
+  logging in as one shows its cube in-game and its name on the scoreboard/as author.
+
+**Accounts, jobs and coins:**
+
+- Claim a migrated name on the iPad while a second account is logged in on Android;
+  both stay logged in independently.
+- Five wrong passwords → the friendly 60-second lockout; after a minute it works.
+- A reload keeps you logged in; so does restarting the server.
+- `document.cookie` in the console shows **nothing** (the login cookie is httpOnly),
+  and `localStorage` holds only `hh_last_account`.
+- Finish a level with coins: the HUD shows your purse, the win screen says
+  "+N coins!", and the menu bar agrees. Replay it: those coins are **silver**, no
+  "+N", and the purse doesn't move.
+- Die halfway with coins collected → nothing credited, no new file in `data/backups/`.
+- Make a brand-new level → the bounty toast. Delete it and make another → **no**
+  second bounty. (Making a genuinely additional level does pay again.)
+- Cube shop: change one thing → the Save button shows the price and the itemised
+  list; spend down until something is unaffordable → "Need N more" and the button
+  is disabled; change your mind back → free again. Buy something and check the
+  purse. Reopen the editor → free (no changes).
+- As a `player`: no ▲/▼ on any level, ✎/🗑 only on your own, no "Save for
+  everyone". Then `curl -X DELETE` somebody else's level **with that player's
+  cookie** → a friendly 403. (Hiding buttons is not the security; this is.)
+- Hand-edit an account to `"editor"` → ✎/🗑 on every level. Add
+  `"extraPerms": ["level.reorder"]` to a `player` → ▲/▼ appear, settings stay locked.
+- Edit `data/prices.json` while the server runs → the cube editor shows the new
+  price without a restart.
+- The trophy board ranks by coins **earned**, and buying a cube does not move you
+  down it.
 - A skin is cosmetic only: a circle/diamond cube dies and lands exactly where a
   square would (hitbox is always `CONFIG.PLAYER_SIZE`).
 - A refresh on the iPad picks up new code (the `js/` no-cache header is working).

@@ -5,8 +5,9 @@
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now hyper-hop
 #
-# The secrets (FAMILY_PIN etc.) live in /etc/hyper-hop.env, NOT in this file,
-# so the PIN stays out of git and is easy to change.
+# The switches (PORT, READ_ONLY) live in /etc/hyper-hop.env, NOT in this file,
+# so they stay out of git and are easy to change. There is no server password:
+# everybody has their own account, kept in data/accounts.json.
 
 [Unit]
 Description=Hyper Hop game server

@@ -40,6 +40,10 @@ export function draw(view, dt) {
   const checkpoints = view.checkpoints, activatedCheckpoints = view.activatedCheckpoints, bridgeFades = view.bridgeFades;
   const totalCoins = view.totalCoins, attempts = view.attempts, runPercent = view.runPercent, runWasBest = view.runWasBest;
   const tileCheckpoint = view.tileCheckpoint;
+  // Coins: what's in your purse, which coins here you've already been paid
+  // for (they draw silver), and what this run just earned you.
+  const coinBalance = view.coinBalance, alreadyEarned = view.alreadyEarned;
+  const runCoinsEarned = view.runCoinsEarned;
   const S = view.S;
   const T = CONFIG.TILE;
   // The level's theme decides the background colors. Theme 0 ("Default"), and
@@ -152,11 +156,16 @@ export function draw(view, dt) {
         ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;      // a little rim so it reads as a bucket
         ctx.strokeRect(x + 3, y + T/3, T - 6, T - T/3 - 1);
       } else if (ch === "*") {
-        if (coinsGot.has(col + "," + row)) continue;
+        const coinKey = col + "," + row;
+        if (coinsGot.has(coinKey)) continue;             // grabbed this run
         const bob = Math.sin(performance.now() / 250 + col) * 4;
-        ctx.fillStyle = CONFIG.COIN_COLOR;
+        // A SILVER coin is one you've already been paid for. Still fun to
+        // grab, but it won't add to your purse again — so you can see at a
+        // glance which coins in this level still pay.
+        const alreadyPaid = alreadyEarned.has(coinKey);
+        ctx.fillStyle = alreadyPaid ? CONFIG.COIN_SILVER_COLOR : CONFIG.COIN_COLOR;
         ctx.beginPath(); ctx.arc(x + T/2, y + T/2 + bob, T/3, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = "#fff"; ctx.lineWidth = 3;
+        ctx.strokeStyle = alreadyPaid ? "rgba(255,255,255,.45)" : "#fff"; ctx.lineWidth = 3;
         ctx.beginPath(); ctx.arc(x + T/2, y + T/2 + bob, T/3 - 6, 0, Math.PI * 2); ctx.stroke();
       } else if (ch === "|") {
         ctx.fillStyle = "#fff"; ctx.fillRect(x + T/2 - 3, y - T, 6, T * 2 + (S.level.rows) * 0);
@@ -277,6 +286,9 @@ export function draw(view, dt) {
   document.getElementById("progressFill").style.width = (prog * 100) + "%";
   ctx.fillStyle = "#fff"; ctx.font = "bold 18px Trebuchet MS"; ctx.textAlign = "right";
   ctx.fillText("\u25CF " + coinsGot.size + " / " + totalCoins, W - 16, 30);
+  // Your purse, just under the coin counter.
+  ctx.fillStyle = CONFIG.COIN_HUD_COLOR;
+  ctx.fillText("\uD83D\uDCB0 " + coinBalance, W - 16, 52);
   ctx.textAlign = "left";
 
   // "from checkpoint" tag under the attempt counter, for a couple of seconds
@@ -298,6 +310,13 @@ export function draw(view, dt) {
     ctx.fillText("LEVEL COMPLETE!", W/2, y); y += 44;
     ctx.fillStyle = "#fff"; ctx.font = "bold 22px Trebuchet MS";
     ctx.fillText("Coins: " + coinsGot.size + " / " + totalCoins + "   Attempts: " + attempts, W/2, y); y += 34;
+    // What the server actually paid us for this run. It can be fewer than
+    // we collected — coins only ever pay the first time.
+    if (runCoinsEarned > 0) {
+      ctx.fillStyle = CONFIG.COIN_COLOR; ctx.font = "bold 28px Trebuchet MS";
+      ctx.fillText("+" + runCoinsEarned + " coins!", W/2, y); y += 34;
+      ctx.fillStyle = "#fff"; ctx.font = "bold 22px Trebuchet MS";
+    }
     if (runWasBest) {                          // you just beat your old record
       ctx.fillStyle = "#ffe14d"; ctx.font = "bold 26px Trebuchet MS";
       ctx.fillText("NEW BEST! 🎉", W/2, y);

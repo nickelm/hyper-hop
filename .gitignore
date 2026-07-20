@@ -14,8 +14,10 @@ desktop.ini
 # Node
 node_modules/
 
-# Server runtime state — levels, settings, and backups live here.
-# These are created and filled in on the server (seeded on first run),
+# Server runtime state — levels, accounts, coins, settings and backups live
+# here. These are created and filled in on the server (seeded on first run),
 # so we keep them OUT of git on purpose. Durability comes from the
 # backups/ folder + the droplet, not from commits.
+# It now also holds scrambled passwords and login cookies, so this must
+# STAY ignored — never commit data/.
 data/

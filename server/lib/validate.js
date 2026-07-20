@@ -45,9 +45,13 @@ const MAX_NAME = 20;                 // a player name is 1–20 letters
 // (This must stay in sync with the CONFIG block in public/index.html.)
 const KNOWN_SETTING_KEYS = new Set([
   "SCROLL_SPEED", "GRAVITY", "JUMP_POWER", "PAD_POWER", "SPIN_SPEED",
-  "TILE", "PLAYER_SIZE", "SPIKE_MERCY",
+  "SMALL_PAD_POWER", "CATAPULT_POWER",
+  "RAMP_LAUNCH", "RAMP_GLUE", "BRIDGE_FADE_TIME",
+  "FAST_MULT", "SLOW_MULT",
+  "TILE", "PLAYER_SIZE", "SPIKE_MERCY", "SAW_RADIUS",
   "PLAYER_COLOR", "PLAYER_EYE_COLOR", "BLOCK_COLOR", "BLOCK_EDGE",
-  "SPIKE_COLOR", "PAD_COLOR", "COIN_COLOR", "GROUND_COLOR",
+  "SPIKE_COLOR", "PAD_COLOR", "SMALL_PAD_COLOR", "CATAPULT_COLOR",
+  "COIN_COLOR", "COIN_SILVER_COLOR", "GROUND_COLOR",
   "SKY_TOP", "SKY_BOTTOM",
   "PARTICLES_ON_DEATH", "TRAIL", "SCREEN_SHAKE",
   "SOUND", "MUSIC", "MUSIC_VOLUME", "MUSIC_BPM", "BEAT_PULSE",
@@ -60,6 +64,35 @@ function normalizeLevel(text) {
   while (lines.length && lines[0].trim() === "") lines.shift();
   while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
   return lines.join("\n");
+}
+
+/* ----------------------------------------------------------------
+   WHERE ARE THE COINS? Answers with a set of keys like "12,4"
+   (column, row) — EXACTLY the same names the game's physics uses, so
+   the server and the tablet always mean the same coin.
+
+   The server needs this to check a tablet's "I collected these coins!"
+   message. Without it, a kid could send made-up coins and get paid.
+
+   CAREFUL: this has to tidy the rows the SAME way parseLevel does in
+   public/js/game/level.js — blank rows are dropped and short rows are
+   padded. If we counted rows differently, every row number would be
+   off and no coin would ever pay out.
+   ---------------------------------------------------------------- */
+function coinKeysFor(levelText) {
+  const rows = String(levelText).split("\n")
+    .map(r => r.replace(/\r/g, ""))
+    .filter(r => r.trim().length > 0);          // same as parseLevel: blank rows vanish
+  const keys = new Set();
+  if (!rows.length) return keys;
+  const width = Math.max(...rows.map(r => r.length));
+  rows.forEach((row, rowNumber) => {
+    const padded = row.padEnd(width, ".");
+    for (let col = 0; col < width; col++) {
+      if (padded[col] === "*") keys.add(col + "," + rowNumber);
+    }
+  });
+  return keys;
 }
 
 // Check that a level is drawn with legal tiles and is not silly-huge.
@@ -190,19 +223,40 @@ function cleanSkin(raw) {
   };
 }
 
-// A profile is one player: a name plus the cube skin they made. Returns the
-// tidy {name, skin}, or throws an Error with a message we can show the kids.
-function validateProfile(body) {
-  const name = (body && typeof body.name === "string") ? body.name.trim() : "";
-  if (!name) throw new Error("Please give your cube a name.");
+// Check a player's name on its own (used when signing up and when
+// renaming). Returns the tidy name, or throws a friendly Error.
+function validateName(raw) {
+  const name = (typeof raw === "string") ? raw.trim() : "";
+  if (!name) throw new Error("Please type a name.");
   if (Array.from(name).length > MAX_NAME) {
     throw new Error("That name is too long (max " + MAX_NAME + " letters).");
   }
-  return { name: name.slice(0, MAX_NAME), skin: cleanSkin(body && body.skin) };
+  return name.slice(0, MAX_NAME);
+}
+
+/* ----------------------------------------------------------------
+   WHAT A PLAYER MAY CHANGE ABOUT THEMSELVES: their name and their
+   cube. That's it.
+
+   This hands back a little "patch" — ONLY the things that were
+   actually sent — and the route then merges it onto the saved player.
+   That matters a lot: the old code rebuilt the whole player from
+   scratch, so anything not listed here (your coins! your password!)
+   would have been wiped out every time you saved your cube.
+
+   It's also an allow-list, so even if a tablet cheekily sends
+   {coins: 999999, role: "admin"} those simply never make it in.
+   ---------------------------------------------------------------- */
+function validateAccountEdit(body) {
+  const b = (body && typeof body === "object" && !Array.isArray(body)) ? body : {};
+  const patch = {};
+  if (b.name != null) patch.name = validateName(b.name);
+  if (b.skin != null) patch.skin = cleanSkin(b.skin);
+  return patch;
 }
 
 module.exports = {
   LEVEL_CHARS, MAX_COLS, MAX_ROWS, DEFAULT_SKIN, MAX_NAME, KNOWN_SETTING_KEYS,
   normalizeLevel, validateLevel, validateSettings, validateScore,
-  countEmoji, cleanSkin, validateProfile,
+  countEmoji, cleanSkin, coinKeysFor, validateName, validateAccountEdit,
 };

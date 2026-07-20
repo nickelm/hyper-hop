@@ -61,30 +61,62 @@ sudo -u hyperhop npm install --omit=dev
 The client (the game itself) has no dependencies and no build step — only the
 server uses Express.
 
-## 6. Set the secrets (this is where you set the family PIN)
+## 6. Set the switches
 
-Create `/etc/hyper-hop.env`. This holds the **family PIN** the kids type to save,
-plus a couple of other switches. Keeping it here (not in git) means the PIN stays
-private and is easy to change.
+Create `/etc/hyper-hop.env`. There is **no server password to set** — everybody
+has their own account and picks their own password the first time they play — so
+this file is just a couple of switches.
 
 ```bash
 cat > /etc/hyper-hop.env <<'EOF'
 PORT=8080
-FAMILY_PIN=pick-a-secret-here
 READ_ONLY=false
 EOF
 chmod 600 /etc/hyper-hop.env
 ```
 
-- **`FAMILY_PIN`** — change `pick-a-secret-here` to whatever the family will type
-  to save a level or shared settings. Anyone without it can still *play*, just not
-  change anything.
 - **`READ_ONLY`** — leave `false` normally. Set it to `true` to **freeze editing**
-  (see the freeze switch section below).
+  (see the freeze switch section below). Logging in and playing still work.
 - **`PORT`** — the port the Node server listens on. Must match the Caddyfile.
 
-To change any of these later, edit this file and run
+To change either of these later, edit this file and run
 `sudo systemctl restart hyper-hop`.
+
+### The first grown-up
+
+The first time the new server starts it moves the old players file into
+`data/accounts.json`, and makes the account named **Nick** an `admin`. Everybody
+else starts as a `player`.
+
+To change somebody's job later, edit `data/accounts.json` by hand:
+
+```bash
+sudo -u hyperhop nano /opt/hyper-hop/data/accounts.json   # change "role"
+```
+
+**No restart needed** — the server re-reads the file on every request, so the new
+job applies to the very next thing that person does. (They should reload the page
+to see the new buttons appear, but the server is already enforcing it.)
+
+`"role"` is `"player"`, `"editor"` (may fix anybody's level) or `"admin"` (may also
+change the shared settings and the level order). To hand out one power without a
+whole promotion, add it to that account's `"extraPerms"`, e.g.
+`"extraPerms": ["level.reorder"]`.
+
+Do the edit when nobody is mid-save if you can — you and the server are both
+writing the same file, and last-one-to-save wins.
+
+If somebody forgets their password, set their `"passwordHash"` to `null` — the
+login screen will then offer to let them pick a new one.
+
+### What things cost
+
+`data/prices.json` is the coin price list. Edit it and the game picks it up
+**immediately** — no restart:
+
+```bash
+sudo -u hyperhop nano /opt/hyper-hop/data/prices.json
+```
 
 ## 7. Turn on the game server (systemd)
 
@@ -118,9 +150,9 @@ ufw allow 443
 ufw --force enable
 ```
 
-Now open **https://cooljaguar.duckdns.org/** on a tablet — the game should load,
-list the four starter levels, and let you play. Making or saving a level will ask
-for the family PIN you set in step 6.
+Now open **https://cooljaguar.duckdns.org/** on a tablet — you should see the
+**Who's playing?** screen. Tap your name and pick a password the first time; after
+that the tablet stays logged in for 90 days, even across server restarts.
 
 ---
 

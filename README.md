@@ -18,15 +18,35 @@ You need [Node.js](https://nodejs.org) (LTS). Then:
 
 ```bash
 npm install
-FAMILY_PIN=1234 node server/server.js
+npm start
 ```
 
 Then open <http://localhost:3000>. On a tablet on the same network, open
-`http://<your-computer-ip>:3000`. The `FAMILY_PIN` is the secret you type to save
-levels or shared settings — anyone can play without it.
+`http://<your-computer-ip>:3000`.
 
-The first run creates a `data/` folder with four starter levels. Levels and
-settings are saved there (and backed up automatically); it's gitignored on purpose.
+The first thing you'll see is **Who's playing?** — tap **+ New player**, pick a
+name and a password (4 letters or more), and you're in. Everybody gets their own
+account, their own cube, and their own purse of coins.
+
+The first run creates a `data/` folder with the starter levels. Levels, accounts,
+scores and settings are saved there (and backed up automatically); it's gitignored
+on purpose.
+
+## Coins
+
+Playing earns coins, and coins buy new looks for your cube:
+
+- **Collect a coin and finish the level** → it pays. Each coin only ever pays
+  once, so coins you've already earned show up **silver** on a replay.
+- **Make a brand-new level** → a bounty (25 coins by default).
+- **The cube editor is the shop.** Changing a part of your cube costs coins;
+  keeping it the same is free, so the classic green cube is free forever. The Save
+  button always tells you the price before you tap it.
+- **🏆 Trophies** ranks everyone by coins *earned ever*, so buying things never
+  costs you your place.
+
+Prices live in `data/prices.json` and a grown-up can change them at any time — the
+shop notices straight away, no restart needed.
 
 ## Controls
 
@@ -64,9 +84,10 @@ Tap **✎ Level Editor** on the menu to open it:
 1. Pick a tile from the palette and **tap-to-paint** on the grid (use **Wider +**
    to add length).
 2. Tap **▶ Play** to test your level immediately.
-3. Tap **⬇ Save to server** to share it — you name it and say who made it once,
-   then type the family PIN. It shows up on everyone's menu.
-4. Tap the **✎** next to a level on the menu to open and change it later.
+3. Tap **⬇ Save to server** to share it — you name it and say who made it once.
+   It shows up on everyone's menu, and a brand-new level earns you a coin bounty.
+4. Tap the **✎** next to a level on the menu to open and change it later. You get
+   a **✎** on your own levels; grown-ups get one on everybody's.
 
 (The **Copy code** button still exports a paste-ready level string as a manual
 backup.)
@@ -94,7 +115,7 @@ is the level editor, and so on. See CLAUDE.md for the full map.
 
 The game runs as a small Node server behind Caddy (for automatic HTTPS) on a
 DigitalOcean droplet. Step-by-step instructions — Ubuntu setup, Node, the systemd
-service, firewall, the family PIN, and how to restore from a backup — are in
+service, firewall, and how to restore from a backup — are in
 [`deploy/SETUP.md`](deploy/SETUP.md).
 
 ## Credits
