@@ -23,9 +23,12 @@ import { CONFIG } from "../config.js";
      =  jump-through platform   -  disappearing bridge
      >  speed up      <  slow down    (speed gates)
      u  flip gravity  n  gravity back (gravity gates)
+     f  fly (rocket)  c  cube again   (flight gates)
 
    The floor is implicit: the bottom row sits on an automatic ground
-   plane. All rows in a level must be the same length.
+   plane. All rows in a level must be the same length. The SKY, though,
+   is always CONFIG.LEVEL_ROWS tall no matter how few rows a level has
+   (see skyTop below) — that's the room you need to fly.
    ---------------------------------------------------------------- */
 
 // Turn a level's text into a map: a grid of rows, plus how many

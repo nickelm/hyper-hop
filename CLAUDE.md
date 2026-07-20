@@ -78,6 +78,8 @@ s  saw blade (death; circular hitbox radius CONFIG.SAW_RADIUS*TILE, circle-vs-bo
 <  slow portal   (scroll speed becomes SCROLL_SPEED * CONFIG.SLOW_MULT)
 u  flip-gravity portal   (gravity points UP: the cube falls upward)
 n  normal-gravity portal (gravity points down again)
+f  fly portal    (become a rocket: HOLD to climb, let go to drop)
+c  cube portal   (back to a normal jumping cube)
 ```
 
 Speed portals (`>` `<`) are full-column gates: crossing the column's midline (at
@@ -98,6 +100,35 @@ is flipped** — they do nothing (and still never kill). Gravity direction is pa
 the checkpoint snapshot and resets to normal on a full restart (level start =
 normal).
 
+Flight gates (`f` `c`) are the same kind of full-column gate and are also
+absolute, not toggles. Between an `f` and a `c` the cube is a little rocket:
+**holding** the button accelerates it toward the current "up" at
+CONFIG.FLY_THRUST (instead of gravity), letting go drops it normally, and its
+vertical speed is clamped to ±CONFIG.FLY_MAX_SPEED. While flying:
+
+- the floor **and** the roof of the world are soft walls — the cube slides along
+  them with `vy = 0`, never dies, and **never sets `onGround`**. That one fact is
+  what keeps a tap from becoming a jump and stops the hold-to-keep-jumping timer
+  in `input.js` from firing; `requestJump` also returns `false` outright.
+- spikes and saws still kill, and a `#` block kills on **any** overlap — you
+  cannot land on things in a rocket.
+- pads, catapults and ramps do nothing; `=`/`-` platforms are pass-through
+  (bridges still fade as you fly past).
+- the cube tips its nose toward its vertical speed (±CONFIG.FLY_TILT) instead of
+  spinning.
+- a `u`/`n` gate flips the rocket too, because the thrust is multiplied by
+  `gravityDir` — there is no third mode. Note this **inverts the controls**: with
+  gravity flipped, holding pushes you toward the roof's opposite side.
+
+Flight is part of the checkpoint snapshot, so dying inside a flight section
+respawns you flying. Level start is always cube mode.
+
+The physics needs to know whether the button is held, which it could not see
+before: `input.js` reports every press and release through a `setHolding`
+callback, and `simState` exposes it as `state.holding`. `input.js` also releases
+on `pointercancel` and `blur`, so a finger sliding off a tablet cannot leave the
+rocket thrusting by itself.
+
 Jump-through platforms (`=` `-`) are one-way: the cube lands on the top when
 falling, but passes straight through them from below and from the sides, and they
 never kill. The `-` bridge is a `=` that fades out after the cube runs past it
@@ -115,6 +146,15 @@ stored JSON and in the server's seed levels, a down-ramp `\` must be written as
 The floor is implicit: the bottom row of the grid sits on an automatic ground
 plane. Rows are top-to-bottom; all rows in a level must be the same length.
 
+The **sky**, by contrast, is not the grid's height. `cellTop()` is anchored to the
+bottom, so a level's tiles sit at the same world position no matter how many rows
+are above them, and `skyTop(level)` (in `js/game/level.js`) returns the roof of
+the world: `CONFIG.LEVEL_ROWS` tall, or the level's own height if it is taller.
+That roof is what a flipped-gravity cube lands on and what a flying cube scrapes;
+in normal cube play there is no ceiling at all. Because the grid itself is never
+padded, row indices, `"col,row"` coin keys and stored level strings are unaffected
+— which keeps the client in step with the server's `coinKeysFor()`.
+
 ## The file map
 
 **Client** (`public/` — plain ES modules, no build step):
@@ -125,9 +165,9 @@ plane. Rows are top-to-bottom; all rows in a level must be the same length.
 | `js/config.js` | `CONFIG` (every tunable number), `DEFAULTS`, `THEMES`, and the cube-skin option lists. The kids' control panel. |
 | `js/main.js` | The app shell: game state, starting/resetting a level, checkpoints, the game loop, the menu + player picker, and startup. Wires every other module together. |
 | `js/api.js` | Every `fetch`: `apiGet`, `apiWrite` (family PIN + one retry), `apiPost` (scores, no PIN). Owns the PIN and the PIN / "are you sure?" pop-ups. |
-| `js/input.js` | Taps and keys → actions: jump, hold-to-keep-jumping, Escape, Z/X checkpoints, in-game buttons. |
+| `js/input.js` | Taps and keys → actions: jump, hold-to-keep-jumping, reporting held-ness (`setHolding`, for flight), Escape, Z/X checkpoints, in-game buttons. |
 | `js/music.js` | The chiptune synth (`Music`) and the `SONGS` list. |
-| `js/game/level.js` | The level format: `parseLevel`, the tile legend, and the `tileAt` / `cellTop` lookups. |
+| `js/game/level.js` | The level format: `parseLevel`, the tile legend, and the `tileAt` / `cellTop` / `skyTop` lookups. |
 | `js/game/physics.js` | **Pure.** The rules of the world at a fixed 240 Hz: `stepPhysics(state, dt)`, `requestJump(state)`. No DOM, canvas, sound or fetch. |
 | `js/game/render.js` | Drawing a frame: sky, ground, every tile, HUD, and the win/death overlays. |
 | `js/game/player.js` | How a cube *looks*: `drawPlayer`, `normalizeSkin`, `hslToHex`. Shared by the game, the previews and the picker buttons. |
@@ -170,7 +210,12 @@ plane. Rows are top-to-bottom; all rows in a level must be the same length.
 
 Physics runs at a fixed 240 Hz (`FIXED_DT`), decoupled from drawing, so all tablets
 play identically. One full-screen canvas; the camera puts the floor at 78% of screen
-height. World coordinates: floor at y = 0, up is negative y.
+height and then **zooms the world so the whole sky fits above it** — one scale
+factor, `zoom = floorY / -skyTop(level)`, applied as a single canvas transform
+around the world layer so tiles, outlines, glyphs and particles all scale
+together. There is no camera Y and no follow/smoothing state to reset. World
+coordinates: floor at y = 0, up is negative y. The HUD and the overlays are drawn
+after that transform is popped, so they are never zoomed or shaken.
 
 `physics.js` is pure, so `main.js` bridges it to the game with two small **live
 views** of its variables — reading or writing a field on them reads or writes the
@@ -268,7 +313,7 @@ so saving a score needs no `X-Family-Pin` — but it's still refused when
 so backup churn stays low.
 
 Server-side level validation (`lib/validate.js`, returns clear messages): only the
-characters `. # ^ o * | / \ = - p U s @ > < u n`, all rows equal length, at most one
+characters `. # ^ o * | / \ = - p U s @ > < u n f c`, all rows equal length, at most one
 `|`, ≤ 500 columns, ≤ 30 rows. The allowed-character list is defined **once**
 (`LEVEL_CHARS`) and the error message is generated from it, so the two can't drift.
 
@@ -283,20 +328,26 @@ Env vars: `PORT` (default 3000), `FAMILY_PIN` (default `1234` for local dev, wit
 warning — always set a real one in production), `READ_ONLY` (`true` freezes writes).
 
 **Known gap:** `KNOWN_SETTING_KEYS` in `lib/validate.js` (what "Save for everyone"
-accepts) has not been updated for the newer tunables — `SMALL_PAD_POWER`,
-`CATAPULT_POWER`, `FAST_MULT`, `SLOW_MULT`, `SAW_RADIUS` and the new colors. They
-can be changed in the Control Panel for this visit, but not shared. Add them when
-you want them shareable.
+accepts) covers the flight tunables (`FLY_THRUST`, `FLY_MAX_SPEED`, `FLY_TILT`)
+and `LEVEL_ROWS`, but still has not been updated for the older stragglers —
+`SMALL_PAD_POWER`, `CATAPULT_POWER`, `FAST_MULT`, `SLOW_MULT`, `SAW_RADIUS` and
+the newer colors. Those can be changed in the Control Panel for this visit, but
+not shared. Add them when you want them shareable.
 
 ## Testing
 
 Two automatic checks, both run by `npm test`:
 
 - **`test/golden.js` — did the physics change?** Replays fixture levels through the
-  real physics with a fixed jump script and compares the cube's position every few
-  steps against saved traces in `test/golden/`. These must stay **byte-identical**.
-  If they differ, the change altered how the game plays — find out why. Only
-  regenerate them (`node test/golden.js`) when you MEANT to change the game.
+  real physics with a fixed jump script (`jumpAt`) and, for the flying levels, a
+  fixed hold script (`holdAt`: pairs of `[fromStep, toStep]`), and compares the
+  cube's position every few steps against saved traces in `test/golden/`. These
+  must stay **byte-identical**. If they differ, the change altered how the game
+  plays — find out why. Only regenerate them (`node test/golden.js`) when you
+  MEANT to change the game.
+  Note the sampled field list in `traceFor()` is effectively frozen: `JSON.stringify`
+  emits keys in insertion order, so adding even one field rewrites every trace.
+  New state (like `flying`) goes in `newState()`, not in the sample.
 - **`test/boot.js` — does the game still hold together?** Loads the real modules with
   a pretend browser and actually runs them: plays a level to the finish and dies on
   another (so the win and death screens draw), then opens the menu, player picker,
@@ -325,6 +376,14 @@ Two automatic checks, both run by `npm test`:
 - Jump, pad bounce, spike death, coin pickup, and finish all work by tap alone.
 - The newer tiles behave: saw, small pad, catapult, `@` checkpoint respawn, speed
   portals, and a gravity flip (landing on the ceiling) and back.
+- Flying (`f` … `c`): holding climbs and letting go drops; the cube scrapes the
+  floor and the roof without dying; spikes, saws and block *sides* still kill;
+  pads and ramps do nothing; a `u` mid-flight reverses the thrust; a `@` inside a
+  flight section respawns you **flying**; after `c` the cube jumps and spins again.
+- Holding thrust for several seconds on a tablet does not select text, scroll, or
+  pop the magnifier; sliding a finger off the screen stops the rocket.
+- A short old level still looks right with the taller sky (more room above, world
+  slightly zoomed), and its gravity-flip sections still work at the new roof.
 - Save to server, Edit, and Save for everyone work by touch; a wrong PIN re-prompts.
 - Picking a level theme (🎨 in the editor) changes its background; it survives a save
   and reopen; a "Default"-theme level still follows the Control Panel colors.
