@@ -10,6 +10,7 @@
 // you can edit isn't worth much.
 
 import { apiGet, apiPost } from "./api.js";
+import { sameSkin } from "./game/player.js";
 
 // What we know right now. `prices` arrives from the server; until it
 // does, everything shows as free rather than as a wrong number.
@@ -17,6 +18,7 @@ const WALLET = {
   balance: 0,
   earnedTotal: 0,
   collectedByLevel: {},     // { levelId: ["col,row", ...] } — coins already paid for
+  looks: [],                // every cube you own: { skin, name, from } — see "My Looks"
   prices: null,
 };
 
@@ -31,7 +33,24 @@ export function setWalletFromMe(me) {
   WALLET.balance = (me && me.coins) || 0;
   WALLET.earnedTotal = (me && me.coinsEarnedTotal) || 0;
   WALLET.collectedByLevel = (me && me.collectedCoins) || {};
+  WALLET.looks = (me && me.looks) || [];
   announce();
+}
+
+/* ----------------------------------------------------------------
+   MY LOOKS — every cube you own. You get one by buying it in the cube
+   editor, or by finishing a level that has its own character.
+
+   The point of the list is that owning something is FOREVER: putting
+   an old cube back on never costs a coin. The server keeps the real
+   list (server/lib/looks.js) and decides what you may wear for free;
+   this copy is only so the Save button can say so before you tap it.
+   ---------------------------------------------------------------- */
+export function myLooks() { return WALLET.looks; }
+
+// Have you got this cube already? (Then wearing it is free.)
+export function ownLook(skin) {
+  return WALLET.looks.some(look => sameSkin(look.skin, skin));
 }
 
 // Fetch the price list once at start-up. If it fails we simply have no
@@ -57,9 +76,13 @@ export function alreadyEarned(levelId) {
    whether we reached the flag; the server decides what that's worth
    and sends back how many coins it actually paid ("credited"), which
    may be fewer than we collected — coins only ever pay once.
+
+   Finishing is also how you win a level's look, so the answer can
+   carry an `unlocked` cube as well. We hand both back together:
+   { credited, unlocked }.
    ---------------------------------------------------------------- */
 export async function reportRun(levelId, coinKeys, completed) {
-  if (levelId == null) return 0;              // a test run — never counts
+  if (levelId == null) return { credited: 0, unlocked: null };   // a test run — never counts
   try {
     const answer = await apiPost("/runs", {
       levelId,
@@ -76,10 +99,16 @@ export async function reportRun(levelId, coinKeys, completed) {
       for (const k of coinKeys) known.add(k);
       WALLET.collectedByLevel[key] = [...known];
     }
+    // Won the level's cube? Put it straight into My Looks, so it's
+    // already waiting for you in the cube editor.
+    if (answer.unlocked && !ownLook(answer.unlocked.skin)) {
+      WALLET.looks = [...WALLET.looks,
+        { skin: answer.unlocked.skin, name: answer.unlocked.name, from: "level" }];
+    }
     announce();
-    return answer.credited || 0;
+    return { credited: answer.credited || 0, unlocked: answer.unlocked || null };
   } catch (e) {
-    return 0;            // a lost coin report is no big deal — keep playing
+    return { credited: 0, unlocked: null };   // a lost coin report is no big deal — keep playing
   }
 }
 
@@ -89,12 +118,16 @@ export async function reportRun(levelId, coinKeys, completed) {
    CHANGED cost anything — so keeping the classic green cube, or
    changing your mind back, is always free.
 
+   And a look you ALREADY OWN is free whatever it looks like: you
+   bought that one once (or a level gave it to you), so it's yours.
+
    The server works this out again for real when you save. This copy
    is only so the button can say the price before you tap it.
    ---------------------------------------------------------------- */
 export function skinCost(savedSkin, newSkin) {
   const prices = WALLET.prices && WALLET.prices.skin;
   if (!prices || !newSkin) return { items: [], total: 0 };
+  if (ownLook(newSkin)) return { items: [], total: 0 };
   const items = [];
   let total = 0;
   for (const part of Object.keys(prices)) {
@@ -108,3 +141,13 @@ export function skinCost(savedSkin, newSkin) {
 
 // Do we even know the prices yet?
 export function havePrices() { return !!(WALLET.prices && WALLET.prices.skin); }
+
+// The most coins one level may hold. The editor uses this to keep a level
+// inside the limit while you draw. If we couldn't reach the server we guess
+// the normal 25 — the server checks again for real when you save, so a wrong
+// guess here can never sneak an over-full level through.
+const DEFAULT_MAX_COINS = 25;
+export function maxCoinsPerLevel() {
+  const most = WALLET.prices && WALLET.prices.maxCoinsPerLevel;
+  return Number.isFinite(most) ? most : DEFAULT_MAX_COINS;
+}

@@ -102,14 +102,19 @@ setGlobal("localStorage", {
 const LOGGED_OUT = process.env.HH_BOOT_LOGGED_OUT === "1";
 const FAKE_SKIN = { bodyColor: "#7dff5e", outlineColor: "#ffffff", faceColor: "#05051a",
                     shape: "square", face: "happy", emoji: "😀", trail: "fade", explosion: "squares" };
+// The cube a level gives you for finishing it — a look you own, plus the
+// green one, so the "My Looks" row really has something to draw.
+const FAKE_CROW = { ...FAKE_SKIN, bodyColor: "#101020", shape: "diamond", face: "cool" };
 const FAKE_ME = {
   id: 1, name: "Test", role: "admin", skin: FAKE_SKIN,
   coins: 50, coinsEarnedTotal: 120, hasPassword: true,
   collectedCoins: { 1: ["3,1"] },
+  looks: [{ skin: FAKE_SKIN, name: "", from: "shop" },
+          { skin: FAKE_CROW, name: "The Crow", from: "level" }],
   powers: ["level.create", "level.editOwn", "level.deleteOwn", "me.edit", "run.report",
            "level.editAny", "level.deleteAny", "settings.edit", "level.reorder", "account.editAny"],
 };
-const FAKE_PRICES = { startingCoins: 50, coinValue: 1, levelCreateBounty: 25,
+const FAKE_PRICES = { startingCoins: 50, coinValue: 1, levelCreateBounty: 25, maxCoinsPerLevel: 25,
   skin: { bodyColor: 5, outlineColor: 5, faceColor: 5, shape: 20, face: 10, emoji: 15, trail: 25, explosion: 25 } };
 
 function reply(data, status = 200) {
@@ -130,12 +135,14 @@ setGlobal("fetch", (url) => {
   if (at("/set-password")) return reply(FAKE_ME);
   if (at("/logout"))      return reply({ ok: true });
   if (at("/levels"))      return reply([{ id: 1, name: "Level One", author: "Test", ownerId: 1,
-                                          level: "..*..|", song: 0, theme: 0 }]);
+                                          level: "..*..|", song: 0, theme: 0,
+                                          reward: { name: "The Crow", skin: FAKE_CROW } }]);
   if (at("/scores"))      return reply([{ levelId: 1, accountId: 1, player: "Test", percent: 100 }]);
   if (at("/settings"))    return reply({});
   if (at("/prices"))      return reply(FAKE_PRICES);
   if (at("/leaderboard")) return reply([{ id: 1, name: "Test", skin: FAKE_SKIN, coinsEarnedTotal: 120 }]);
-  if (at("/runs"))        return reply({ credited: 2, balance: 52, coinsEarnedTotal: 122 });
+  if (at("/runs"))        return reply({ credited: 2, balance: 52, coinsEarnedTotal: 122,
+                                         unlocked: { name: "The Crow", skin: FAKE_CROW } });
   return reply([]);
 });
 setGlobal("URL", function () { return { pathname: "/" }; });   // api.js reads the page address
@@ -169,9 +176,9 @@ const DIE_LEVEL = "...................^.......^....###...###....o......^^...##..
     catch (e) { problem = problem || (what + "\n" + e.stack); }
   }
 
-  function playFor(what, levelText, messages) {
+  function playFor(what, levelText, messages, reward) {
     check(what, () => {
-      game.startLevel(game.parseLevel(levelText, messages), false, false, 0, 2, 1);
+      game.startLevel(game.parseLevel(levelText, messages), false, false, 0, 2, 1, reward);
       for (let f = 0; f < 800; f++) {
         for (let k = 0; k < 4; k++) game.stepPhysics(game.simState, game.FIXED_DT);
         game.drainSimEvents();
@@ -190,12 +197,18 @@ const DIE_LEVEL = "...................^.......^....###...###....o......^^...##..
     check("the login screen builds", () => game.buildLoginPicker());
     check("the login screen shows", () => game.showLogin());
   } else {
-    playFor("played a level to the finish (HUD, coins, sign, WIN screen)", WIN_LEVEL, WIN_MESSAGES);
+    // The win level is played as its own character, so the enforced skin, the
+    // "New look!" line on the win screen and the unlock all really run.
+    playFor("played a level to the finish (HUD, coins, sign, level look, WIN screen)",
+      WIN_LEVEL, WIN_MESSAGES, { name: "The Crow", skin: FAKE_CROW });
     playFor("died on a level (explosion, death screen, respawn)", DIE_LEVEL);
 
     check("the menu builds", () => game.buildMenu([
       { id: 1, name: "Level One", author: "kid", ownerId: 1, level: "..|", song: 0, theme: 0 },
       { id: 2, name: "Level Two", author: "kid", ownerId: 2, level: "..|", song: 1, theme: 2 },
+      // one that carries a look, so the 🎭 / 🔒 line on the button is drawn too
+      { id: 3, name: "The Crow Flies", author: "kid", ownerId: 1, level: "..|", song: 0, theme: 0,
+        reward: { name: "The Crow", skin: FAKE_CROW } },
     ]));
     check("the menu bar builds (your cube + purse)", () => game.updateMenuBar());
     check("the login screen builds", () => game.buildLoginPicker());
@@ -203,7 +216,12 @@ const DIE_LEVEL = "...................^.......^....###...###....o......^^...##..
     check("screens switch", () => {
       game.showScreen("loginScreen"); game.showScreen("menuScreen"); game.showScreen("editorScreen");
     });
-    check("the cube editor opens", () => game.openSkinEditor({ id: 1, name: "Test", skin: {} }));
+    check("the cube editor opens (with My Looks)", () => game.openSkinEditor({ id: 1, name: "Test", skin: {} }));
+    // ...and again in the other mode, where the level editor borrows it to
+    // design the cube a level is played as.
+    check("the cube editor opens for a level's look", () => game.openSkinEditor(
+      { id: 1, name: "Test", skin: {} },
+      { forLevel: true, name: "The Crow", skin: FAKE_CROW, onDone: () => {}, onCancel: () => {} }));
     check("the level editor opens (new level)", () => game.openNewLevel());
     check("the level editor opens (editing a saved level)", () => game.openLevelForEdit(
       { id: 1, name: "L", author: "kid", ownerId: 1, level: "..#..\n..^..|", song: 1, theme: 2 }));

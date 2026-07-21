@@ -74,13 +74,15 @@ function migrate() {
 
   const accounts = [...found.values()].map(record => {
     const id = Number.isFinite(Number(record.id)) ? Number(record.id) : nextFreeId++;
+    const skin = cleanSkin(record.skin);     // no old cube? the classic green one
     return {
       id,
       name: record.name,
       passwordHash: null,          // null = nobody has claimed it yet
       role: record.name.toLowerCase() === FIRST_ADMIN_NAME.toLowerCase() ? "admin" : "player",
       extraPerms: [],
-      skin: cleanSkin(record.skin),          // no old cube? the classic green one
+      skin,
+      looks: [{ skin, name: "", from: "shop" }],   // the cube they already had is theirs to keep
       coins: prices.startingCoins,
       coinsEarnedTotal: 0,
       collectedCoins: {},

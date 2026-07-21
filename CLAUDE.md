@@ -80,7 +80,7 @@ L  ceiling up-ramp   (the mirror of `/`, hanging from the roof; only while gravi
 7  ceiling down-ramp (the mirror of `\`, likewise)
 ^  spike (death; forgiving inner hitbox, see CONFIG.SPIKE_MERCY)
 o  bounce pad (launches upward at CONFIG.PAD_POWER)
-*  coin (collectible)
+*  coin (collectible; a level may hold at most `maxCoinsPerLevel` of them — see Coin cap)
 |  finish line
 =  jump-through platform (thin slab; land on top, pass through from below/sides; never deadly)
 -  disappearing bridge (same physics as `=`; fades away once passed, CONFIG.BRIDGE_FADE_TIME; cosmetic)
@@ -199,6 +199,50 @@ untouchable on a tablet.
 `.tileLabel`). There is no hover on an iPad, so a `title=` tooltip is invisible;
 if you add a tile, give it a short label that fits a 58-pixel button.
 
+**The bottom row of buttons must never leave the screen.** ▶ Play and ⇩ Save live
+in `#editorBottom`, and the editor is a flex column of top bar → grid → buttons.
+`#editorBottom` is `flex: 0 0 auto` (never shrinks, never squeezed out) and
+`#editorTop` is `flex: 0 1 auto; overflow-y: auto` — **the top is what gives way**.
+On top of that `checkEditorFits()` in `js/ui/editor.js` *measures* where the
+buttons actually landed and, if they are off the bottom, adds a `compact` class
+and then caps `#editorTop`'s height. That measurement exists because no CSS media
+query can see that the *browser itself* is zoomed in (Safari's own "aA" page-zoom
+setting, for one). It is a fixed two-step check, never a loop — the boot test's
+pretend DOM answers every measurement with a stub, so a loop would hang there.
+It runs from `layoutEditor()` (open the editor, come back from a test play, and
+on resize), not from `drawEditor()`, so painting a run of blocks stays fast.
+
+**Two zoom rules, and they are not the same zoom.** 🔍+ / 🔍− in the editor make
+the *level's squares* bigger. The *browser's* zoom is `js/ui/zoomguard.js`'s job,
+and the page is supposed to never have any: `initZoomGuard()` says no to Safari's
+`gesturestart`/`gesturechange`/`gestureend` (the `user-scalable=no` in the viewport
+tag looks like it should do this, but **iPads have ignored it since iOS 10**), and
+`touch-action` in the CSS handles double-tap. It deliberately does *not* swallow
+quick double taps in JavaScript — `preventDefault()` on a tap throws away the
+button press with it, so 🔍+ tapped twice fast would only count once.
+**Any writing box on the page must use a font of 16px or bigger**: an iPad zooms
+the whole page in the moment you tap a smaller one, and never zooms back out —
+that was how the editor's bottom buttons used to disappear. If it somehow gets
+zoomed anyway, `#zoomResetBtn` appears *inside the part you can still see* (from
+`visualViewport.offsetLeft/offsetTop`, which is the whole trick) and tries the
+viewport-meta reset; there is no web API that guarantees this, so if the zoom is
+still there 400ms later it says "pinch with two fingers" instead of failing quietly.
+
+**The coin cap.** A level may hold at most `maxCoinsPerLevel` coins (the price
+list, default 25), so nobody can carpet a level in `*` and turn it into a coin
+machine. The editor keeps you inside the limit as you draw rather than telling
+you off: painting a coin when the level is already full takes the **first** coin
+away and puts the new one down, with a toast to say so — but only **once per
+finger-stroke** (`swappedThisStroke`), or dragging along at the limit would drag
+the level's coins with you. A `★ N / 25` chip (`#coinCount`) shows while the coin
+tool is held, and stays visible in red while a level is over the limit. "The
+first coin" always means `firstCoin()`: leftmost column first, top to bottom
+within a column — the order you meet them running right. **Levels made before the
+limit keep working**; the cap only bites when one is saved again, and
+`trimCoinsIfNeeded()` asks first, so coins never vanish without a "yes".
+The server checks the count again on every save (`validateLevel`, counting with
+`coinKeysFor`), because the tablet is never the one that decides.
+
 Jump-through platforms (`=` `-`) are one-way: the cube lands on the top when
 falling, but passes straight through them from below and from the sides, and they
 never kill. Landing needs **both** halves of the test — you were above the slab a
@@ -215,6 +259,18 @@ micro-hop (CONFIG.RAMP_GLUE). A jump always overrides the glue. A `/` at the foo
 a block stack lets the cube run up onto the stack instead of dying on its side. In
 stored JSON and in the server's seed levels, a down-ramp `\` must be written as
 `\\` so a literal backslash survives encoding.
+
+**A block right next door to a ramp never kills you from the side** — that is
+`rampBeside()` in `physics.js`, and it is not a nicety, it is what makes ramps
+work at all. A ramp's slope is *lower* than the top of the block it climbs to, so
+a cube standing on the slope is always poking a little way into that block. While
+the ramp is holding you (`player.onRamp`) that overlap is ignored — but the moment
+you **jump**, the ramp lets go of you (a jump beats the glue) while you are still
+standing in that same corner, and the block used to kill you for it. So the block
+pass asks two questions now: "is a ramp holding me?" *and* "am I over a ramp square
+right beside this block, in the same row?". Same row, next door only: a block one
+row **higher** than the ramp's top is a real wall, and running into that still ends
+the run. `test/golden/ramp-jump.json` is the trace that keeps this honest.
 
 Ceiling ramps (`L` `7`) are those same two ramps turned upside down, for running
 along the roof after a `u` gate: `L` is the mirror of `/` (it climbs as you go
@@ -280,11 +336,12 @@ padded, row indices, `"col,row"` coin keys and stored level strings are unaffect
 | `js/game/render.js` | Drawing a frame: sky, ground, every tile, HUD, and the win/death overlays. |
 | `js/game/player.js` | How a cube *looks*: `drawPlayer`, `normalizeSkin`, `hslToHex`. Shared by the game, the previews and the picker buttons. |
 | `js/game/effects.js` | The trail and the death explosion (`drawTrail`, `spawnExplosion`, `renderParticles`). |
-| `js/ui/editor.js` | The level editor: paint grid, palette, tune/theme buttons, zoom, signs, test-play, copy/paste, save. |
+| `js/ui/editor.js` | The level editor: paint grid, palette, tune/theme/🎭-look buttons, zoom, signs, test-play, copy/paste, save. |
 | `js/ui/scrollbars.js` | Scroll bars you can drag with a finger (the editor's grid). Knows nothing about levels. |
-| `js/ui/skins.js` | The cube editor and its little live-preview cube. |
+| `js/ui/skins.js` | The cube editor, its live-preview cube, the **My Looks** row — and, in `forLevel` mode, designing the look a level is played as. |
 | `js/ui/settings.js` | The Control Panel: sliders, colors, switches, "Save/Reset for everyone". |
 | `js/ui/toast.js` | The little "Saved!" pop-up. |
+| `js/ui/zoomguard.js` | Keeps the *browser's own* zoom from running away: blocks pinching, and shows a "Reset zoom" button (placed where you can still see it) if the page gets zoomed anyway. |
 
 **Server** (`server/` — Node + Express, one dependency, no build step):
 
@@ -294,7 +351,7 @@ padded, row indices, `"col,row"` coin keys and stored level strings are unaffect
 | `routes/auth.js` | `/api/me`, `/api/accounts` (list + signup), `/api/login`, `/api/set-password`, `/api/logout`. Owns the 5-tries lockout. |
 | `routes/levels.js` | `/api/levels` — list, create (+ bounty), reorder, update, delete. |
 | `routes/accounts.js` | `/api/accounts/:id` — change your name/cube. **This is the shop:** it prices what changed and takes the coins. |
-| `routes/runs.js` | `/api/runs` — "I finished a level with these coins" → coins credited. |
+| `routes/runs.js` | `/api/runs` — "I finished a level with these coins" → coins credited, and the level's look handed over. |
 | `routes/scores.js` | `/api/scores` — best % per player per level. |
 | `routes/leaderboard.js` | `/api/leaderboard` — everyone ranked by coins earned ever. |
 | `routes/prices.js` | `/api/prices` — the shop price list, so the Save button can show a price. |
@@ -306,16 +363,19 @@ padded, row indices, `"col,row"` coin keys and stored level strings are unaffect
 | `lib/sessions.js` | Who's logged in. Stores a *fingerprint* of each token, never the token. |
 | `lib/cookies.js` | Reading and writing the login cookie by hand (httpOnly, SameSite=Lax). |
 | `lib/prices.js` | The price list, re-read whenever `data/prices.json` changes on disk. |
+| `lib/looks.js` | **What cubes you own** ("My Looks"): `sameSkin`, `looksOf`, `ownsLook`, `addLook`. The shop and the runs route both ask here. |
 | `lib/migrate.js` | The one-time move from the old `profiles.json` to `accounts.json`. |
 | `lib/errors.js` | `NotFound` (404) and `NotAllowed` (403), so routes can `throw` and still answer properly. |
 
 **Other:**
 
 - `data/` — runtime state, created/seeded on first run and **gitignored**:
-  - `levels.json` — `{id, name, author, level, song, theme, messages, ownerId, updatedAt}`.
+  - `levels.json` — `{id, name, author, level, song, theme, messages, reward, ownerId, updatedAt}`.
     Array order is the play order (changed via the reorder endpoint). `ownerId` is
     who may edit it; `null` means admin-only (the built-in levels). `messages` is
     the level's signs (`{"col,row": "words"}`) and is missing on older levels.
+    `reward` is the look this level is played as and gives you for finishing it
+    (`{name, skin}`, or null) — see "My Looks" under Skins.
   - `settings.json` — CONFIG overrides saved "for everyone" (a flat subset).
   - `scores.json` — `{levelId, accountId, player, percent, updatedAt}`: each
     player's **best % completion** per level (100 = finished). One row per
@@ -397,6 +457,7 @@ these are 9-year-olds). A row in `accounts.json` looks like:
 { id, name, passwordHash|null, role, extraPerms: [],
   skin: {...}, coins, coinsEarnedTotal,
   collectedCoins: { "<levelId>": ["col,row", ...] },   // coins already paid for
+  looks: [ { skin, name, from } ],                     // every cube you own (My Looks)
   bountiesPaid,                                        // how many level bounties earned
   createdAt, updatedAt }
 ```
@@ -432,6 +493,8 @@ already been paid for, then credits the difference. So:
 - Making a **brand-new** level pays `levelCreateBounty`. This is counted, not
   listed by id: you're paid when you own more levels than you've been paid for —
   so making a level, deleting it and making it again earns nothing.
+- A level may hold at most `maxCoinsPerLevel` coins, so a level can't be turned
+  into a coin machine. The editor keeps you inside it; the server checks it too.
 - The **trophy board** ranks by `coinsEarnedTotal` (lifetime earnings), never by
   the balance in your purse, so buying a cube can't cost you your place. If it
   did, nobody would ever buy anything.
@@ -440,12 +503,16 @@ already been paid for, then credits the difference. So:
 sent with the one it has saved and charges for the parts that actually *changed*,
 at the prices in `data/prices.json`. Keeping a part the same is free, so **the
 default green cube is free forever**, and changing your mind back costs nothing.
+**A look you already own is free too**, whatever it looks like — `priceTheChanges`
+asks `ownsLook` before it prices anything, and a cube you pay for is added to your
+looks in the same breath (see "My Looks" under Skins).
 The Save button shows the live price ("Save — 45 coins") and goes to
 "Need 20 more" when you can't afford it. Prices are hand-edited in
 `data/prices.json` and picked up without a restart:
 
 ```
 { "startingCoins": 50, "coinValue": 1, "levelCreateBounty": 25,
+  "maxCoinsPerLevel": 25,
   "skin": { "bodyColor": 5, "outlineColor": 5, "faceColor": 5,
             "shape": 20, "face": 10, "emoji": 15, "trail": 25, "explosion": 25 } }
 ```
@@ -490,6 +557,59 @@ parameterized by the active skin's style; `CONFIG.TRAIL` and
 `CONFIG.PARTICLES_ON_DEATH` still govern the master on/off and piece count. The
 skin editor is a third full screen (`#skinScreen`), reached from the picker.
 
+### My Looks, and the look a level is played as
+
+A **look** is a saved skin. Owning one is forever: **wearing a look you already
+own is free**, so the cube editor is a wardrobe as well as a shop. Looks arrive
+two ways, and an account's list lives in `accounts.json`:
+
+```
+looks: [ { skin: {...}, name: "",          from: "shop"  },   // you bought it
+         { skin: {...}, name: "The Crow",  from: "level" } ]  // a level gave it to you
+```
+
+`server/lib/looks.js` is **the only place that decides what somebody owns**:
+`sameSkin`, `looksOf`, `ownsLook`, `addLook`. Two rules are baked into it. An
+account with no `looks` yet simply owns the cube it is wearing (`looksOf`'s
+fallback), so nothing had to be migrated. And the list caps at `MAX_LOOKS` (30),
+dropping the oldest **bought** look — never a level's prize, never the cube you
+are wearing right now. `sameSkin` is mirrored in `public/js/game/player.js` so the
+Save button can say "free!" before you tap; as always the server is the one that
+really decides.
+
+**A level can be played as its own character.** A level record may carry:
+
+```
+reward: { name: "The Crow", skin: {...} }    // or null — most levels have none
+```
+
+and then *everybody* plays it as that cube — the author included, every time,
+**even after they have won it** (the level keeps its character; that's the point).
+Finishing it hands the look over for keeps. In the client this is one line in
+`activeSkin()` in `main.js`: a level's look beats your own cube, and the trail and
+explosion follow because they read `activeSkin` too. `S.reward` is set by
+`startLevel(…, levelId, reward)`.
+
+The look is designed in the **level** editor's 🎭 button, which borrows the **cube**
+editor to do it: `openSkinEditor(profile, {forLevel: true, name, skin, onDone,
+onCancel})`. In that mode nothing is bought and nothing is sent to `/api/accounts`
+— the answer goes back to the level editor through `onDone`, and `onDone(null)`
+("✖ No look") takes the look off the level again. `main.js` wires the two together
+via the editor's `editLook` dep, so `editor.js` still imports no other UI module.
+A level's look is the one look that **has a name**, because winning it has to
+announce itself; looks you buy are shown as cubes only.
+
+`cleanReward` in `lib/validate.js` tidies it, and follows the signs' rule:
+anything odd is **dropped, not refused**. `validateLevel` always returns `reward`
+(null when there is none) so that saving a level that used to have one really
+does take it away.
+
+The prize is handed over in `routes/runs.js`, inside the same `updateJson` as the
+coins. Note the ordering trap there: that callback used to `return SKIP_SAVE` the
+moment there were no fresh coins, which would have meant **the tenth replay could
+never unlock anything**. It now skips only when there were neither new coins nor a
+new look.
+
 ## The API
 
 All reads are open. Every **mutation needs you to be logged in** (the browser sends
@@ -513,7 +633,7 @@ with a friendly 403 when `READ_ONLY=true`.
 | DELETE | `/api/levels/:id`   | owner / editor     | delete a level                        |
 | GET    | `/api/scores`       | anyone             | all high scores                       |
 | POST   | `/api/scores`       | logged in          | save a `{levelId, percent}` best (see note) |
-| POST   | `/api/runs`         | logged in          | `{levelId, collectedCoinKeys, completed}` → `{credited, balance}` |
+| POST   | `/api/runs`         | logged in          | `{levelId, collectedCoinKeys, completed}` → `{credited, unlocked, balance}` |
 | GET    | `/api/leaderboard`  | anyone             | everyone ranked by coins earned ever   |
 | GET    | `/api/prices`       | anyone             | the shop price list                    |
 | GET    | `/api/settings`     | anyone             | current CONFIG overrides              |
@@ -535,9 +655,15 @@ password give the *same* message, so guessing can't discover who exists.
 
 Server-side level validation (`lib/validate.js`, returns clear messages): only the
 characters `. # ^ o * | / \ L 7 = - p U s @ ! > < u n f c h g`, all rows equal length,
-at most one `|`, ≤ 500 columns, ≤ 30 rows. The allowed-character list is defined
+at most one `|`, ≤ 500 columns, ≤ 30 rows, and at most `maxCoinsPerLevel` coins.
+The allowed-character list is defined
 **once** (`LEVEL_CHARS`) and the error message is generated from it, so the two
-can't drift. A level's signs go through `cleanMessages`: ≤ 30 of them, ≤ 120
+can't drift. The coin limit is handed **in** (`validateLevel(body, { maxCoins })`,
+from `routes/levels.js`, which already has `getPrices()`) rather than looked up
+here: `validate.js` mustn't require `prices.js`, because that requires
+`storage.js`, which requires `validate.js`. With no limit passed there is no cap
+at all, which is why only the two save routes enforce it — reading a level that
+was already over the limit never re-validates it. A level's signs go through `cleanMessages`: ≤ 30 of them, ≤ 120
 letters each, keys that really are a square inside this level. Anything odd is
 **dropped, not refused** (like an unknown skin field) — a strange sign should never
 stop a kid saving their level.
@@ -636,11 +762,21 @@ Two automatic checks, both run by `npm test`:
   along the roof without dying, and a jump still beats the glue. With gravity
   normal, `L` and `7` do nothing at all (and still never kill); with gravity
   flipped, `/` and `\` likewise do nothing.
+- Tapping jump the whole way up a `/` onto the blocks it leads to never kills —
+  including right at the very top, where the cube is already inside the first
+  block. The same going off the far end down a `\`, and on `L`/`7` after a `u`.
+  A ramp into a block stack **one row higher** still kills, as it always has.
 - Signs (`!`): the 💬 tool paints a signpost and asks for the words; the sign and
   its words are drawn in the level and the cube runs straight through them. Save,
   go back to the menu, re-open for edit → the words are still there. "Copy code"
   includes a `messages:` line and Import brings the signs back; code copied
   *before* signs existed still imports fine.
+- The page itself never zooms: pinch with two fingers on the menu, in a level and
+  in the editor → nothing moves. Open the editor, tap **Copy code**, close it, tap
+  **Import**, close it → the page is still life-size (this used to zoom in and stay
+  there). Tapping 🔍+ twice quickly still zooms the grid twice.
+- Turn the tablet both ways in the editor, and try a small window: the bottom row
+  (▶ Play … ← Menu) stays on the screen, the tiles shrink or scroll instead.
 - The editor by finger: dragging draws a run of blocks (it never pans); both
   scroll bars appear once the grid overflows and drag smoothly; painting at the
   edge of the box slides the grid along; 🔍+ zooms in past "the whole level fits"
@@ -665,6 +801,18 @@ Two automatic checks, both run by `npm test`:
 - The cube editor: each shape/face/trail/explosion changes the live preview; tap the
   preview to jump and **💀 Try it out** fires the explosion; the emoji face renders
   (check iPad Safari + Android Chrome).
+- **My Looks**: the row appears once you own two cubes, a level's prize wears a 🏅,
+  and tapping one loads it with "You've already got this one — free!" (the purse
+  does not move when you save it). Buy something new → it joins the row.
+- **A level's look** (🎭 in the level editor): design one, name it, "⇩ Use this
+  look" → the button reads 🎭 The Crow and Play tests it wearing that cube, not
+  yours. Save, go back, re-open for edit → still there. "✖ No look" takes it off
+  and the level goes back to your own cube. Copy code has a `reward:` line and
+  Import brings it back; code copied *before* looks existed still imports.
+- **Winning a look**: on another account, that level shows 🔒 The Crow on the menu,
+  is played as The Crow, and finishing it says "New look: The Crow! 🎭" — then it's
+  in that player's My Looks with a 🏅 and free to wear. Replay it: still played as
+  The Crow, no second unlock, no new file in `data/backups/` if no coins were fresh.
 - Two accounts made on two browsers both show on the login screen after a reload;
   logging in as one shows its cube in-game and its name on the scoreboard/as author.
 
@@ -680,6 +828,12 @@ Two automatic checks, both run by `npm test`:
   "+N coins!", and the menu bar agrees. Replay it: those coins are **silver**, no
   "+N", and the purse doesn't move.
 - Die halfway with coins collected → nothing credited, no new file in `data/backups/`.
+- The coin cap: pick the coin tool → the `★ N / 25` chip appears and counts up.
+  Paint a 26th coin → the first coin (leftmost column, top to bottom) disappears
+  and a toast says so; **dragging** on at the limit swaps exactly one, not a whole
+  row. A level saved before the limit opens with a red `30 / 25`, plays fine, and
+  asks before trimming when you save. A hand-made `curl` save with too many coins
+  is refused by the server.
 - Make a brand-new level → the bounty toast. Delete it and make another → **no**
   second bounty. (Making a genuinely additional level does pay again.)
 - Cube shop: change one thing → the Save button shows the price and the itemised

@@ -446,6 +446,13 @@ export function draw(view, dt) {
       ctx.fillText("+" + runCoinsEarned + " coins!", W/2, y); y += 34;
       ctx.fillStyle = "#fff"; ctx.font = "bold 22px Trebuchet MS";
     }
+    // This level was played as its own character, and now that cube is yours
+    // to wear whenever you like.
+    if (view.runUnlocked) {
+      ctx.fillStyle = "#ff9ae0"; ctx.font = "bold 26px Trebuchet MS";
+      ctx.fillText("New look: " + view.runUnlocked.name + "! 🎭", W/2, y); y += 34;
+      ctx.fillStyle = "#fff"; ctx.font = "bold 22px Trebuchet MS";
+    }
     if (runWasBest) {                          // you just beat your old record
       ctx.fillStyle = "#ffe14d"; ctx.font = "bold 26px Trebuchet MS";
       ctx.fillText("NEW BEST! 🎉", W/2, y);

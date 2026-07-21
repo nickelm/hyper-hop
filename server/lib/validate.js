@@ -129,10 +129,34 @@ function cleanMessages(raw, cols, rows) {
   return out;
 }
 
+/* ----------------------------------------------------------------
+   THE LOOK A LEVEL CARRIES: { name: "The Crow", skin: {...} } — the
+   cube everybody wears while playing it, and the prize you keep once
+   you finish it. Most levels haven't got one, and that's why this
+   answers null rather than making something up.
+
+   Anything odd is DROPPED, not refused (the same rule as the signs
+   above): a strange look should never stop a kid saving their level.
+   ---------------------------------------------------------------- */
+function cleanReward(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  try {
+    return { name: validateName(raw.name), skin: cleanSkin(raw.skin) };
+  } catch (e) {
+    return null;              // no name, or a broken cube — just no look, then
+  }
+}
+
 // Check that a level is drawn with legal tiles and is not silly-huge.
 // Returns the cleaned-up {name, author, level, song, theme}, or throws
 // an Error with a message we are happy to show the kids.
-function validateLevel(body) {
+//
+// `limits.maxCoins` is the most  *  this level may hold. It's handed IN
+// rather than looked up here, because the number lives in the price list
+// (data/prices.json) and lib/prices.js already asks storage.js, which asks
+// us — so fetching it here would go round in a circle. Leave it out and
+// there is no coin limit at all, exactly as before.
+function validateLevel(body, limits = {}) {
   const name = (body && typeof body.name === "string") ? body.name.trim() : "";
   if (!name) throw new Error("Please give the level a name.");
 
@@ -156,6 +180,19 @@ function validateLevel(body) {
   }
   if (finishCount > 1) throw new Error("A level can have at most one finish line (|).");
 
+  // Not too many coins. We count them with coinKeysFor — the same function that
+  // decides which coins pay out — so "how many coins are in this level" can only
+  // ever mean one thing. (The editor trims coins before it saves, so a kid
+  // should never see this; the server checks anyway, because a tablet can send
+  // us anything it likes.)
+  if (Number.isFinite(limits.maxCoins)) {
+    const coins = coinKeysFor(level).size;
+    if (coins > limits.maxCoins) {
+      throw new Error("Too many coins (" + coins + ") — a level can have at most " +
+                      limits.maxCoins + ". Take some out. 🙂");
+    }
+  }
+
   // Keep name/author tidy and a sensible length.
   const author = (body.author && typeof body.author === "string") ? body.author.trim() : "";
   const song = Number.isFinite(body.song) ? Math.max(0, Math.floor(body.song)) : 0;
@@ -167,6 +204,10 @@ function validateLevel(body) {
     song,
     theme,
     messages: cleanMessages(body.messages, width, rows.length),
+    // The look this level makes you wear (and gives you for finishing it).
+    // Always answered — null when there isn't one — so saving a level that
+    // USED to have a look really does take it away again.
+    reward: cleanReward(body.reward),
   };
 }
 
@@ -293,5 +334,5 @@ function validateAccountEdit(body) {
 module.exports = {
   LEVEL_CHARS, MAX_COLS, MAX_ROWS, DEFAULT_SKIN, MAX_NAME, KNOWN_SETTING_KEYS,
   normalizeLevel, validateLevel, validateSettings, validateScore,
-  countEmoji, cleanSkin, cleanMessages, coinKeysFor, validateName, validateAccountEdit,
+  countEmoji, cleanSkin, cleanMessages, cleanReward, coinKeysFor, validateName, validateAccountEdit,
 };

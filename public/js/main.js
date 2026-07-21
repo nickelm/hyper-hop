@@ -20,16 +20,17 @@ import { Music, SONGS } from "./music.js";
 import { apiGet, apiWrite, apiPost, apiDelete, askConfirm } from "./api.js";
 import { initInput } from "./input.js";
 import { showToast } from "./ui/toast.js";
+import { initZoomGuard } from "./ui/zoomguard.js";
 import { initSettings, isPanelOpen, openPanel, closePanel } from "./ui/settings.js";
 import { initSkins, openSkinEditor } from "./ui/skins.js";
-import { initEditor, openLevelForEdit, openNewLevel } from "./ui/editor.js";
+import { initEditor, openLevelForEdit, openNewLevel, layoutEditor, backToEditor } from "./ui/editor.js";
 import {
   initLogin, showLogin, buildLoginPicker, loadAccounts, logout,
   currentAccount, setCurrentAccount, may,
 } from "./ui/login.js";
 import {
   initEconomy, setWalletFromMe, loadPrices, balance, earnedTotal,
-  alreadyEarned, reportRun,
+  alreadyEarned, reportRun, ownLook,
 } from "./economy.js";
 
 
@@ -117,7 +118,7 @@ const sfx = {
 };
 
 // ---------------- Game state ----------------
-const S = { screen: "menu", level: null, levelId: null, testMode: false, paused: false, practice: false, songIndex: 0, themeIndex: 0, campaign: false, campaignIndex: 0 };
+const S = { screen: "menu", level: null, levelId: null, testMode: false, paused: false, practice: false, songIndex: 0, themeIndex: 0, campaign: false, campaignIndex: 0, reward: null };
 let player, camX, attempts, particles, trail, coinsGot, totalCoins, shake, winT, deadT;
 let runPercent = 0;      // how far you got this run (0..100), shown on the death/win screen
 let runWasBest = false;  // did this run beat your old best on this level? (for the "NEW BEST!" flash)
@@ -127,8 +128,10 @@ let beatPulse = 0;      // 0..1, jumps to 1 on the beat then fades (for the beat
 // ---------------- Who's playing ----------------
 // The logged-in player lives in ui/login.js; currentAccount() asks it.
 // runCoinsEarned is how many coins the server just paid us for the run
-// we finished, so the win screen can shout "+3 coins!".
+// we finished, so the win screen can shout "+3 coins!" — and runUnlocked
+// is the look we just won, if this level had one to give.
 let runCoinsEarned = 0;
+let runUnlocked = null;
 let bridgeFades = {};   // "col,row" -> how visible a  -  bridge still is (1 = solid, 0 = gone). Cosmetic only.
 let squash = 0;         // brief squash-and-stretch on the cube after a catapult launch (1 = full, 0 = none). Cosmetic.
 let tileCheckpoint = null;         // the last  @  checkpoint you touched (a respawn snapshot), or null
@@ -144,13 +147,14 @@ let holding = false;               // is a finger (or the space bar) held down? 
 // even ones (0, 2, 4...) are the beats — that's when we flash the world.
 Music.onStep = (i) => { if (CONFIG.BEAT_PULSE && i % 2 === 0) beatPulse = 1; };
 
-function startLevel(parsed, isTest, practice, songIndex, themeIndex, levelId) {
+function startLevel(parsed, isTest, practice, songIndex, themeIndex, levelId, reward) {
   S.level = parsed; S.testMode = !!isTest; S.screen = "game";
   S.paused = false;
   S.practice = !!practice;
   S.songIndex = songIndex || 0;   // which tune from music.js this level plays
   S.themeIndex = themeIndex || 0; // which background theme this level uses
   S.levelId = (levelId != null) ? levelId : null;  // which server level (for high scores); null = a test run, no score
+  S.reward = reward || null;      // the cube THIS level is played as (null = wear your own)
   checkpoints = [];             // fresh level = no checkpoints yet
   attempts = 0;
   resetRun();
@@ -170,6 +174,7 @@ function resetRun() {
   particles = []; trail = []; shake = 0; winT = 0; deadT = 0;
   runPercent = 0; runWasBest = false;
   runCoinsEarned = 0;                  // nothing earned yet this run
+  runUnlocked = null;                  // and no look won yet either
   coinsGot = new Set();
   bridgeFades = {};                    // every  -  bridge is solid again at the start of a run
   squash = 0;                          // no leftover catapult stretch
@@ -297,6 +302,7 @@ const gameView = {
   get coinBalance() { return balance(); },
   get alreadyEarned() { return alreadyEarned(S.levelId); },
   get runCoinsEarned() { return runCoinsEarned; },
+  get runUnlocked() { return runUnlocked; },
   get S() { return S; },
   get shake() { return shake; }, set shake(v) { shake = v; },
   get beatPulse() { return beatPulse; }, set beatPulse(v) { beatPulse = v; },
@@ -328,10 +334,15 @@ function drainSimEvents() {
       submitScore(runPercent);
       // Tell the server which coins we picked up. It decides what that's
       // worth (coins only ever pay once) and tells us what it paid, so
-      // the win screen can shout about it.
-      reportRun(S.levelId, coinsGot, true).then(credited => {
+      // the win screen can shout about it. Finishing a level that has a
+      // look of its own also wins that cube — the server says so here.
+      reportRun(S.levelId, coinsGot, true).then(({ credited, unlocked }) => {
         runCoinsEarned = credited;
-        if (credited > 0) updateMenuBar();
+        runUnlocked = unlocked;
+        if (credited > 0 || unlocked) updateMenuBar();
+        // The win screen says it too, but in "Play All" we may already be
+        // off to the next level — the toast follows you there.
+        if (unlocked) showToast("New look: " + unlocked.name + "! 🎭");
       });
     }
   }
@@ -359,7 +370,12 @@ function levelProgress() {
 // before the first login), we build the classic cube from the Control
 // Panel colors, so "Save for everyone" color tweaks still work and the
 // default look is exactly the same as it always was.
+//
+// A level with a look of its own beats all of that: "The Crow Flies" is
+// played as The Crow by everybody, every time — even once you've won it.
+// The trail and the explosion follow along, because they read this too.
 function activeSkin() {
+  if (S.reward && S.reward.skin) return normalizeSkin(S.reward.skin);
   const me = currentAccount();
   if (me && me.skin) return normalizeSkin(me.skin);
   return normalizeSkin({ bodyColor: CONFIG.PLAYER_COLOR, faceColor: CONFIG.PLAYER_EYE_COLOR });
@@ -416,7 +432,7 @@ function leaveGame() {
   document.getElementById("attempts").classList.add("hidden");
   document.getElementById("topLeftBtns").classList.add("hidden");
   document.getElementById("practiceBtns").classList.add("hidden");
-  if (S.testMode) { S.screen = "editor"; showScreen("editorScreen"); }
+  if (S.testMode) { S.screen = "editor"; showScreen("editorScreen"); layoutEditor(); }
   else { S.screen = "menu"; showScreen("menuScreen"); }
 }
 function afterWin() {
@@ -434,7 +450,7 @@ function afterWin() {
 function startLevelByIndex(i) {
   const L = serverLevels[i];
   if (!L) { leaveGame(); return; }
-  startLevel(parseLevel(L.level, L.messages), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id);
+  startLevel(parseLevel(L.level, L.messages), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id, L.reward);
 }
 
 // "Play All": start at the first level and roll through them all in order.
@@ -540,9 +556,9 @@ function buildMenu(levels) {
     const play = document.createElement("button");
     play.className = "btn green";
     const title = (i + 1) + ". " + L.name + (L.author ? "  — " + L.author : "");
-    play.innerHTML = '<div>' + escapeHtml(title) + '</div>' +
+    play.innerHTML = '<div>' + escapeHtml(title) + '</div>' + lookLine(L) +
       '<div class="levelScore">' + scoreLine(L.id) + '</div>';
-    play.onclick = () => { S.campaign = false; startLevel(parseLevel(L.level, L.messages), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id); };
+    play.onclick = () => { S.campaign = false; startLevel(parseLevel(L.level, L.messages), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id, L.reward); };
     // ...a little 📊 opens the full leaderboard for this level...
     const board = document.createElement("button");
     board.className = "btn small"; board.textContent = "📊"; board.title = "High scores";
@@ -580,6 +596,14 @@ function buildMenu(levels) {
     }
     list.appendChild(item);
   });
+}
+
+// Levels that are played as their own character say so on the button, so you
+// can see the prize before you start. 🔒 until you've won it, 🎭 once it's yours.
+function lookLine(L) {
+  if (!L.reward || !L.reward.name) return "";
+  const got = ownLook(L.reward.skin);
+  return '<div class="levelLook">' + (got ? "🎭 " : "🔒 ") + escapeHtml(L.reward.name) + '</div>';
 }
 
 // The little grey line under a level's name: the top score and your own best.
@@ -784,6 +808,19 @@ initEditor({
   showScreen,
   startLevel,
   getPlayerName: () => playerName(),
+  /* The level editor's 🎭 button borrows the CUBE editor to design the look
+     this level is played as. We hand it over here and bring the answer back:
+     `apply(reward)` gives the editor the new look (or null for "no look"),
+     and tapping Back just returns without changing anything. */
+  editLook: (current, apply) => {
+    openSkinEditor(currentAccount() || {}, {
+      forLevel: true,
+      name: current ? current.name : "",
+      skin: current ? current.skin : null,
+      onDone: (reward) => { apply(reward); backToEditor(); },
+      onCancel: () => backToEditor(),
+    });
+  },
   onSaved: async (created) => {
     serverLevels = await apiGet("/levels");   // keep our copy fresh for the menu
     buildMenu(serverLevels);
@@ -843,6 +880,7 @@ async function loadWorld() {
 }
 
 async function init() {
+  initZoomGuard();                 // don't let the tablet zoom the page about
   loadPrices();                    // for the cube shop; fine if it's slow
   let me = null;
   try { me = await apiGet("/me"); } catch (e) { me = null; }

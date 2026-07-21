@@ -175,6 +175,9 @@ router.post("/accounts", notFrozen, (req, res) => {
         role: "player",
         extraPerms: [],
         skin: cleanSkin(null),          // the classic green cube, free forever
+        // ...and it's the first look in your collection, so you can always
+        // come back to it without paying (see lib/looks.js).
+        looks: [{ skin: cleanSkin(null), name: "", from: "shop" }],
         coins: prices.startingCoins,
         coinsEarnedTotal: 0,
         collectedCoins: {},

@@ -29,6 +29,7 @@ const DEFAULT_PRICES = {
   startingCoins: 50,        // what every new player starts with
   coinValue: 1,             // how many coins one  *  in a level is worth
   levelCreateBounty: 25,    // a thank-you for making a brand-new level
+  maxCoinsPerLevel: 25,     // the most coins one level is allowed to hold
   skin: {                   // what changing each part of your cube costs
     bodyColor: 5, outlineColor: 5, faceColor: 5,
     shape: 20, face: 10, emoji: 15, trail: 25, explosion: 25,

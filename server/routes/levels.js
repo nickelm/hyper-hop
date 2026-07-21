@@ -53,10 +53,16 @@ router.get("/", (req, res) => {
   res.json(readJson(LEVELS_FILE));
 });
 
+// How many coins one level may hold. It lives in the price list with the rest
+// of the money numbers, so a grown-up can change it by hand without a restart.
+function coinLimit() {
+  return { maxCoins: getPrices().maxCoinsPerLevel };
+}
+
 // Make a brand-new level (the server picks its number).
 router.post("/", guard, (req, res) => {
   let clean;
-  try { clean = validateLevel(req.body); }
+  try { clean = validateLevel(req.body, coinLimit()); }
   catch (e) { return res.status(400).json({ error: e.message }); }
 
   if (!can(req.account, "level.create")) {
@@ -115,7 +121,7 @@ router.put("/order", guard, (req, res) => {
 // Save changes to one level.
 router.put("/:id", guard, (req, res) => {
   let clean;
-  try { clean = validateLevel(req.body); }
+  try { clean = validateLevel(req.body, coinLimit()); }
   catch (e) { return res.status(400).json({ error: e.message }); }
 
   const id = Number(req.params.id);

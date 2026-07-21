@@ -10,6 +10,15 @@
   html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0b1e;
     font-family: "Trebuchet MS", Verdana, sans-serif; touch-action: none;
     -webkit-user-select: none; user-select: none; }
+  /* On a phone, "100%" can mean the tall page that hides UNDER the browser's
+     toolbars. 100svh is the part you can always see. Old browsers ignore this
+     line and keep the 100% above. */
+  html, body { height: 100svh; }
+  /* Everything you tap: "manipulation" means a tap is JUST a tap. It switches
+     off the browser's double-tap-to-zoom, which is one of the ways the page
+     used to get stuck zoomed in. (js/ui/zoomguard.js blocks pinching.) */
+  .btn, .tileBtn, .optBtn, .swatch, .profileBtn, input, textarea, label {
+    touch-action: manipulation; }
   #gameCanvas { display: block; width: 100%; height: 100%; }
   .screen { position: absolute; inset: 0; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 16px; }
@@ -39,14 +48,18 @@
   #attempts { position: absolute; top: 34px; width: 100%; text-align: center;
     color: rgba(255,255,255,.85); font-weight: bold; font-size: 16px; pointer-events: none; }
   /* ---------- Editor ---------- */
-  #editorScreen { justify-content: flex-start; background: #14142e; gap: 0; }
+  #editorScreen { justify-content: flex-start; background: #14142e; gap: 0; overflow: hidden; }
+  /* The editor is three stacked rows: the tiles on top, the grid in the middle,
+     the buttons along the bottom. When the screen is short, the TOP is the one
+     that gives way (it shrinks and scrolls) — see #editorBottom below. */
   #editorTop { display: flex; gap: 8px; align-items: center; padding: 10px;
-    width: 100%; justify-content: center; flex-wrap: wrap; }
+    width: 100%; justify-content: center; flex-wrap: wrap;
+    flex: 0 1 auto; min-height: 0; overflow-y: auto; touch-action: pan-y; }
   /* If there are ever so many tiles that they don't fit, the palette scrolls.
      touch-action: pan-y is what lets a FINGER do that — the page itself is
      touch-action: none, and that would otherwise win. */
   #palette { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center;
-    max-height: 32vh; overflow-y: auto; touch-action: pan-y; }
+    max-height: min(32vh, 190px); overflow-y: auto; touch-action: pan-y; }
   /* Every tile button says what it IS underneath its picture — a tablet has no
      mouse, so a hover tooltip would never show up. */
   .tileBtn { width: 58px; border-radius: 12px; border: 3px solid #555a8a;
@@ -97,7 +110,7 @@
   /* The cube editor: rows of choices under a live preview */
   #skinScreen { gap: 10px; padding: 12px; overflow: auto; justify-content: flex-start; }
   #skinTop { display: flex; gap: 8px; align-items: center; width: 100%;
-    max-width: 680px; justify-content: space-between; }
+    max-width: 680px; justify-content: space-between; flex-wrap: wrap; }
   #skinPreviewWrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
   #skinPreview { background: #14142c; border-radius: 12px; touch-action: none;
     border: 3px solid #3ec6ff; }
@@ -112,10 +125,25 @@
     background: #1e1e40; border: 3px solid #555a8a; border-radius: 10px;
     padding: 6px 12px; cursor: pointer; }
   .optBtn.selected { border-color: #7dff5e; background: #2a4a2a; }
+  /* The name box for a LEVEL's look ("The Crow"). Only that one has a name. */
+  #skinLookName { height: 40px; flex: 1; min-width: 100px; max-width: 220px;
+    border-radius: 12px; border: 3px solid #555a8a; background: #1e1e40; color: #fff;
+    font-family: inherit; font-weight: bold; font-size: 17px; padding: 0 10px; }
+
+  /* MY LOOKS: a row of every cube you own. Tap one to wear it again. */
+  #looksWrap { width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: 4px; }
+  #looksHint { color: #b9b9d8; font-size: 13px; font-weight: bold; }
+  #looksRow { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+  .lookBtn { position: relative; flex: none; width: 54px; height: 54px; padding: 0;
+    background: #1e1e40; border: 3px solid #555a8a; border-radius: 12px; cursor: pointer; }
+  .lookBtn canvas { width: 48px; height: 48px; display: block; }
+  .lookBtn.selected { border-color: #7dff5e; background: #2a4a2a; }
+  /* A 🏅 on the corner of a cube a level gave you. */
+  .lookBadge { position: absolute; right: -4px; top: -6px; font-size: 15px; }
   /* The grid, with our own scroll bars down the right and along the bottom.
      A finger on the CANVAS always paints (touch-action: none) — the bars are
      how you move around, so drawing and scrolling can never be confused. */
-  #editorGrid { flex: 1; width: 100%; min-height: 0; display: grid; gap: 4px; padding: 6px;
+  #editorGrid { flex: 1 1 0; width: 100%; min-height: 0; display: grid; gap: 4px; padding: 6px;
     grid-template-columns: 1fr 22px; grid-template-rows: 1fr 22px; }
   #editorGridWrap { grid-column: 1; grid-row: 1; min-width: 0; min-height: 0;
     overflow: auto; touch-action: none; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
@@ -126,12 +154,41 @@
   .edThumb { position: absolute; background: #3ec6ff; border-radius: 999px; }
   #edScrollY { grid-column: 2; grid-row: 1; }
   #edScrollX { grid-column: 1; grid-row: 2; }
-  #editorBottom { display: flex; gap: 8px; padding: 10px; flex-wrap: wrap; justify-content: center; }
+  /* THE BOTTOM ROW NEVER MOVES. "flex: 0 0 auto" means it never shrinks and is
+     never squeezed off the bottom of the screen — Play and Save must always be
+     tappable, however short the tablet is. */
+  #editorBottom { display: flex; gap: 8px; padding: 10px; flex-wrap: wrap; justify-content: center;
+    flex: 0 0 auto; }
+  /* A short screen (a tablet lying down, or a small window): make everything in
+     the editor a bit smaller so all three rows still fit. */
+  @media (max-height: 620px) {
+    #palette { max-height: 120px; }
+    #editorTop, #editorBottom { padding: 6px; gap: 6px; }
+    .tileBtn { width: 48px; }
+    .tileBtn .tileIcon { font-size: 18px; }
+    #levelNameInput { height: 40px; font-size: 17px; }
+  }
+  /* Smaller still — editor.js adds this class when it MEASURES the bottom row
+     and finds it off the screen (which can happen when the browser itself is
+     zoomed in, and no media query can see that). */
+  #editorScreen.compact #palette { max-height: 84px; }
+  #editorScreen.compact #editorTop { max-height: 34vh; }
+  #editorScreen.compact .tileBtn { width: 44px; padding: 2px; }
+  #editorScreen.compact .tileBtn .tileIcon { font-size: 16px; }
+  #editorScreen.compact .tileBtn .tileLabel { font-size: 8px; }
+  #editorScreen.compact #editorTop,
+  #editorScreen.compact #editorBottom { padding: 4px; gap: 5px; }
+  #editorScreen.compact .btn.small { font-size: 14px; padding: 5px 10px; }
+  #editorScreen.compact #levelNameInput { height: 36px; font-size: 16px; }
+  #editorScreen.compact #coinCount { height: 36px; font-size: 15px; padding: 0 8px; }
   #exportBox, #importBox { position: absolute; inset: 8%; background: #10102a; border: 4px solid #3ec6ff;
     border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 10px; z-index: 20; }
+  /* KEEP THIS FONT AT 16px OR BIGGER. An iPad zooms the whole page in the moment
+     you tap a writing box with smaller letters than that — and it never zooms
+     back out, which is how the editor's bottom buttons used to disappear. */
   #exportText, #importText { flex: 1; width: 100%; background: #05051a; color: #7dff5e; border: none;
-    font-family: monospace; font-size: 14px; padding: 10px; white-space: pre; resize: none;
-    -webkit-user-select: text; user-select: text; }
+    font-family: monospace; font-size: 16px; padding: 10px; white-space: pre; resize: none;
+    touch-action: pan-y; -webkit-user-select: text; user-select: text; }
   /* Small centered pop-ups: "Save to server", the password box, and friends.
      Every new pop-up must be added to this list, or it won't be centered. */
   #saveBox, #passwordBox, #confirmBox, #nameBox, #scoresBox, #boardBox, #messageBox { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
@@ -140,6 +197,9 @@
   #saveBox label, #passwordBox label { color: #fff; font-weight: bold; }
   /* The grey score line under each level's Play button. */
   .levelScore { font-size: 13px; font-weight: normal; color: rgba(255,255,255,.7); margin-top: 3px; }
+  /* "🎭 The Crow" — the cube this level is played as, and its prize.
+     🔒 until you've finished it once. */
+  .levelLook { font-size: 13px; font-weight: bold; color: #ff9ae0; margin-top: 3px; }
   /* The 📊 high-scores list. */
   #scoresList { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow-y: auto; }
   .scoreRow { display: flex; justify-content: space-between; color: #fff; font-weight: bold;
@@ -153,10 +213,22 @@
   #levelNameInput { height: 52px; border-radius: 12px; border: 3px solid #555a8a;
     background: #1e1e40; color: #fff; font-size: 20px; font-weight: bold; padding: 0 14px;
     min-width: 180px; }
+  /* "★ 7 / 25" — how many coins this level has. Not a button: you can't tap it.
+     It turns red when a level made before the limit has too many. */
+  #coinCount { height: 52px; display: flex; align-items: center; border-radius: 12px;
+    border: 3px solid #555a8a; background: #1e1e40; color: #ffd700; font-size: 18px;
+    font-weight: bold; padding: 0 12px; white-space: nowrap; }
+  #coinCount.over { border-color: #ff6b6b; color: #ff6b6b; }
   .toast { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
     background: #7dff5e; color: #05051a; font-weight: bold; padding: 10px 22px;
     border-radius: 999px; opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 30; }
   .toast.show { opacity: 1; }
+  /* "Reset zoom" — the way back if the page ever gets zoomed in and stuck.
+     js/ui/zoomguard.js shows it and moves it to wherever you can still see. */
+  #zoomResetBtn { position: fixed; z-index: 40; font-family: inherit; font-weight: bold;
+    font-size: 16px; color: #05051a; background: #ffe14d; border: 3px solid #fff;
+    border-radius: 999px; padding: 8px 16px; box-shadow: 0 4px 12px rgba(0,0,0,.5);
+    touch-action: manipulation; cursor: pointer; }
   /* ---------- In-game buttons ---------- */
   #topLeftBtns { position: absolute; top: 10px; left: 10px; display: flex; gap: 8px;
     z-index: 15; pointer-events: auto; }
@@ -252,8 +324,14 @@
   <div id="editorTop">
     <div id="palette"></div>
     <input id="levelNameInput" placeholder="Level name" value="My Level" maxlength="30">
+    <!-- How many coins this level has. editor.js shows it while you hold the
+         coin tool (and whenever a level has too many). -->
+    <div id="coinCount" class="hidden"></div>
     <button class="btn small" id="tuneBtn">&#9834; Tune</button>
     <button class="btn small" id="themeBtn">&#127912; Theme</button>
+    <!-- The cube this level is played as, and the prize for finishing it.
+         Tapping it opens the cube editor (see editLook in main.js). -->
+    <button class="btn small" id="lookBtn">&#127917; No look</button>
     <button class="btn small" id="widerBtn">Wider +</button>
     <button class="btn small" id="narrowBtn">Shorter &minus;</button>
     <button class="btn small" id="zoomOutBtn" title="Show more">&#128269;&minus;</button>
@@ -278,8 +356,11 @@
 <div id="skinScreen" class="screen hidden">
   <div id="skinTop">
     <h2 style="margin:0;font-size:22px" id="skinTitle">My Cube</h2>
+    <!-- Only a LEVEL's look has a name ("The Crow"). Hidden the rest of the time. -->
+    <input id="skinLookName" class="hidden" placeholder="Name this look" maxlength="20">
     <div style="display:flex;gap:8px">
       <button class="btn green small" id="skinSaveBtn">&#8681; Save</button>
+      <button class="btn small hidden" id="skinNoLookBtn">&#10006; No look</button>
       <button class="btn pink small" id="skinBackBtn">&#8592; Menu</button>
     </div>
   </div>
@@ -288,6 +369,11 @@
     <!-- What this cube costs: only the parts you actually changed. -->
     <div id="skinPrice" style="color:#ffe14d;font-size:13px;font-weight:bold;text-align:center"></div>
     <button class="btn small" id="skinDeathBtn">&#128128; Try it out</button>
+  </div>
+  <!-- MY LOOKS: every cube you own. Tap one to put it back on, free. -->
+  <div id="looksWrap" class="hidden">
+    <div id="looksHint"></div>
+    <div id="looksRow"></div>
   </div>
   <div class="skinControls" id="skinControls"></div>
 </div>
@@ -383,6 +469,9 @@
 </div>
 
 <div class="toast" id="toast">Copied!</div>
+
+<!-- Only appears if the page somehow gets zoomed in (see js/ui/zoomguard.js). -->
+<button id="zoomResetBtn" class="hidden">&#128269; Reset zoom</button>
 
 <!-- The whole game. main.js pulls in every module (config, level, physics,
      render, player, effects, music) — it's the only script this page needs. -->

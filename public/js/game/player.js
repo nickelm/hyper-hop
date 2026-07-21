@@ -57,6 +57,21 @@ export function normalizeSkin(raw) {
   };
 }
 
+/* ----------------------------------------------------------------
+   ARE THESE THE SAME CUBE? Two cubes are the same LOOK when every
+   part of them matches. My Looks uses this to tell whether you
+   already own the cube you're building — an owned look is free.
+
+   The server has its own copy of this in server/lib/looks.js. If you
+   change one, change the other — but the server is the one that
+   really decides what you own and what it costs.
+   ---------------------------------------------------------------- */
+export function sameSkin(a, b) {
+  if (!a || !b) return false;
+  const one = normalizeSkin(a), two = normalizeSkin(b);
+  return Object.keys(one).every(part => one[part] === two[part]);
+}
+
 // Draw just the cube's OUTLINE SHAPE at the origin (already moved + rotated),
 // then fill and stroke it. hs is half the cube's size.
 function drawShape(ctx, shape, hs) {

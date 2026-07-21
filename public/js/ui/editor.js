@@ -12,7 +12,8 @@
 import { CONFIG, THEMES } from "../config.js";
 import { parseLevel } from "../game/level.js";
 import { Music, SONGS } from "../music.js";
-import { apiWrite } from "../api.js";
+import { apiWrite, askConfirm } from "../api.js";
+import { maxCoinsPerLevel } from "../economy.js";
 import { showToast } from "./toast.js";
 import { initScrollbars } from "./scrollbars.js";
 
@@ -22,6 +23,7 @@ let showScreen = () => {};
 let startLevel = () => {};
 let getPlayerName = () => "";
 let onSaved = async () => {};
+let editLook = () => {};
 
 export function initEditor(deps) {
   S = deps.S;
@@ -29,6 +31,7 @@ export function initEditor(deps) {
   startLevel = deps.startLevel;
   getPlayerName = deps.getPlayerName;
   onSaved = deps.onSaved;
+  editLook = deps.editLook;      // opens the cube editor to design this level's look
 }
 
 const ED = {
@@ -42,6 +45,7 @@ const ED = {
   theme: 0,                       // which background theme (from THEMES) this level uses
   editingId: null,                // the server level we're changing (null = a brand-new one)
   author: "",                     // who made this level (asked for on the first save)
+  reward: null,                   // the look this level is played as: {name, skin} (null = none)
 };
 function edInit() {
   ED.rows = CONFIG.LEVEL_ROWS;
@@ -128,6 +132,7 @@ TOOLS.forEach(t => {
     ED.tool = t.ch;
     tileBtns.forEach(c => c.classList.remove("selected"));
     b.classList.add("selected");
+    updateCoinCount();            // the coin counter only shows while you hold the coin
   };
   tileBtns.push(b);
   paletteEl.appendChild(b);
@@ -267,6 +272,47 @@ function drawEditor() {
   eCtx.fillStyle = "rgba(255,255,255,.5)";
   eCtx.fillRect(0, eCanvas.height - 2, eCanvas.width, 2);
   bars.refresh();                        // the grid changed size — move the scroll bars to match
+  updateCoinCount();
+}
+
+/* ----------------------------------------------------------------
+   HOW MANY COINS? A level may only hold so many (the server decides
+   how many — see maxCoinsPerLevel in economy.js), so nobody can
+   carpet a level in coins and make a coin machine out of it.
+
+   "The FIRST coin" always means the same thing here: the one you'd
+   meet first running right — leftmost column first, and top to bottom
+   within a column. Both the auto-remove while you draw and the trim
+   when you save ask firstCoin(), so the two can never disagree.
+   ---------------------------------------------------------------- */
+function countCoins() {
+  let n = 0;
+  for (const row of ED.grid) for (const ch of row) if (ch === "*") n++;
+  return n;
+}
+function firstCoin() {
+  for (let col = 0; col < ED.cols; col++) {
+    for (let r = 0; r < ED.rows; r++) {
+      if (ED.grid[r] && ED.grid[r][col] === "*") return { col, r };
+    }
+  }
+  return null;
+}
+function removeFirstCoin() {
+  const coin = firstCoin();
+  if (coin) ED.grid[coin.r][coin.col] = ".";
+}
+
+// The little "★ 7 / 25" chip next to the level's name. It shows while you
+// hold the coin tool — and also whenever a level has too many coins, so an
+// older level over the limit says so the moment you open it.
+const coinCountEl = document.getElementById("coinCount");
+function updateCoinCount() {
+  const most = maxCoinsPerLevel();
+  const have = countCoins();
+  coinCountEl.textContent = "★ " + have + " / " + most;
+  coinCountEl.classList.toggle("over", have > most);
+  coinCountEl.classList.toggle("hidden", ED.tool !== "*" && have <= most);
 }
 
 // Paint one square. A finger dragged across the grid comes through here over
@@ -283,6 +329,15 @@ function edPaint(e, firstTouch) {
   // Dragging a finger sends this square after square; redrawing the whole grid
   // for one that is ALREADY what you're painting would just make it stutter.
   if (ED.grid[r][col] === ED.tool && ED.tool !== "!") return;
+  // One coin too many? Take the FIRST coin away and put this one down instead,
+  // so drawing never stops with an error. Only once per finger-stroke, though:
+  // otherwise dragging along at the limit would drag the level's coins with you.
+  if (ED.tool === "*" && countCoins() >= maxCoinsPerLevel()) {
+    if (swappedThisStroke) return;                  // already swapped one — lift your finger
+    removeFirstCoin();
+    swappedThisStroke = true;
+    showToast("Coin limit (" + maxCoinsPerLevel() + ") — removed the first coin");
+  }
   ED.grid[r][col] = ED.tool;
   // Painting over a square wipes the sign that used to be there, so a message
   // can never be left behind pointing at a block.
@@ -303,6 +358,9 @@ const EDGE_SCROLL_SPEED = 12;    // how far it slides each frame
 let painting = false;
 let lastPoint = null;            // where the finger is right now (for the edge sliding)
 let edgeTimer = null;
+// Has this one stroke already swapped a coin for the level's first one? (See
+// edPaint — one swap per stroke, so a drag can't eat a whole row of coins.)
+let swappedThisStroke = false;
 
 function edgeScrollStep() {
   edgeTimer = null;
@@ -321,6 +379,7 @@ function edgeScrollStep() {
 }
 function startPainting(e) {
   painting = true;
+  swappedThisStroke = false;     // a fresh stroke may swap one coin again
   lastPoint = { clientX: e.clientX, clientY: e.clientY, x: e.clientX, y: e.clientY };
   if (edgeTimer === null) edgeTimer = requestAnimationFrame(edgeScrollStep);
 }
@@ -406,7 +465,49 @@ document.getElementById("zoomOutBtn").onclick = () => {
   if (ED.zoom <= 0) return;              // 0 = the whole level already fits
   zoomBy(-1);
 };
-window.addEventListener("resize", () => { if (S && S.screen === "editor") drawEditor(); });
+/* ----------------------------------------------------------------
+   DO THE BOTTOM BUTTONS STILL FIT?
+   Play, Save, Menu and friends live along the bottom of the editor,
+   and they must ALWAYS be tappable. index.html already promises they
+   are never squeezed off, but a very short screen — a tablet lying
+   down, a small window, or a browser that is itself zoomed in — can
+   still push them out of sight. A style rule can't tell when the
+   browser is zoomed, so instead we MEASURE where the buttons actually
+   ended up, and if they're off the screen we make everything smaller.
+   Exactly two goes at it, never a loop, so this can never spin.
+   ---------------------------------------------------------------- */
+const MIN_GRID_HEIGHT = 90;     // always leave at least this much room for the level itself
+const eScreen = document.getElementById("editorScreen");
+const eTop = document.getElementById("editorTop");
+const eBottom = document.getElementById("editorBottom");
+
+// Is the bottom of that row still above the bottom of the screen?
+function fitsOnScreen(el) {
+  const box = el.getBoundingClientRect();
+  return !(box.bottom > window.innerHeight + 1);
+}
+function checkEditorFits() {
+  // Start from "everything normal size", in case the tablet was just turned
+  // the other way round and there's plenty of room again.
+  eScreen.classList.remove("compact");
+  eTop.style.maxHeight = "";
+  if (fitsOnScreen(eBottom)) return;
+
+  eScreen.classList.add("compact");        // try 1: smaller tiles and buttons
+  if (fitsOnScreen(eBottom)) return;
+
+  // try 2: still no room, so put a lid on the row of tiles — it scrolls
+  // inside itself, and the buttons come back onto the screen.
+  const room = window.innerHeight - eBottom.getBoundingClientRect().height - MIN_GRID_HEIGHT;
+  if (room > 0) eTop.style.maxHeight = room + "px";
+}
+
+// Fit the editor to the screen, then draw the level in whatever space is left.
+// Exported so main.js can call it when you come BACK from testing your level —
+// the tablet may have been turned round while you were playing.
+export function layoutEditor() { checkEditorFits(); drawEditor(); }
+
+window.addEventListener("resize", () => { if (S && S.screen === "editor") layoutEditor(); });
 
 document.getElementById("widerBtn").onclick = () => {
   ED.cols += 10; ED.grid.forEach(row => { for (let i = 0; i < 10; i++) row.push("."); });
@@ -445,11 +546,31 @@ themeBtn.onclick = () => {
 };
 updateThemeBtn();
 
+/* ----------------------------------------------------------------
+   THE LEVEL'S LOOK. A level can be played as its own character — "The
+   Crow Flies" is played as The Crow, by everybody, every time — and
+   whoever finishes it keeps that cube forever.
+
+   The cube itself is designed in the CUBE editor, because that's the
+   page that already knows how to build one. We just hand it over and
+   take the answer back: `editLook` (from main.js) opens it, and calls
+   us back with the new look, with null for "this level hasn't got one",
+   or not at all if the kid tapped Back.
+   ---------------------------------------------------------------- */
+const lookBtn = document.getElementById("lookBtn");
+function updateLookBtn() {
+  lookBtn.textContent = "🎭 " + (ED.reward ? ED.reward.name : "No look");
+}
+lookBtn.onclick = () => {
+  editLook(ED.reward, reward => { ED.reward = reward; updateLookBtn(); });
+};
+updateLookBtn();
+
 function edToText() {
   return ED.grid.map(row => row.join("")).join("\n");
 }
 document.getElementById("playTestBtn").onclick = () => {
-  startLevel(parseLevel(edToText(), ED.messages), true, false, ED.song, ED.theme);
+  startLevel(parseLevel(edToText(), ED.messages), true, false, ED.song, ED.theme, null, ED.reward);
 };
 // Make the level's name safe to drop inside "..." in the exported code,
 // so a name with a quote in it can't break things.
@@ -465,9 +586,12 @@ document.getElementById("copyBtn").onclick = () => {
   // get the line at all, so the code looks just like it always did.
   const signs = Object.keys(ED.messages).length
     ? "  messages: " + JSON.stringify(ED.messages) + ",\n" : "";
+  // ...and so does the level's look, on one line of its own. A level
+  // without one doesn't get the line, so old code still looks the same.
+  const look = ED.reward ? "  reward: " + JSON.stringify(ED.reward) + ",\n" : "";
   document.getElementById("exportText").value =
     "{\n  name: \"" + escapeName(levelName()) + "\",\n  song: " + ED.song +
-    ",\n  theme: " + ED.theme + ",\n" + signs +
+    ",\n  theme: " + ED.theme + ",\n" + signs + look +
     "  level: `\n" + edToText() + "\n`,\n},";
   document.getElementById("exportBox").classList.remove("hidden");
 };
@@ -495,6 +619,12 @@ function importLevel(text) {
   const signsMatch = text.match(/messages:\s*(\{[^}]*\})/);
   let signs = {};
   if (signsMatch) { try { signs = JSON.parse(signsMatch[1]); } catch (e) { signs = {}; } }
+  // And the level's look. Copy always writes it on ONE line, and a dot never
+  // matches a newline — so this grabs that whole line and nothing else, even
+  // though the look has a { } inside it.
+  const lookMatch = text.match(/reward:\s*(\{.*\})\s*,/);
+  let look = null;
+  if (lookMatch) { try { look = JSON.parse(lookMatch[1]); } catch (e) { look = null; } }
   // If there is a `...` grid block, use only what's inside the backticks.
   const first = text.indexOf("`"), last = text.lastIndexOf("`");
   const gridText = (first !== -1 && last > first) ? text.slice(first + 1, last) : text;
@@ -509,6 +639,8 @@ function importLevel(text) {
   }
   if (songMatch) { ED.song = Number(songMatch[1]) % SONGS.length; updateTuneBtn(); }
   if (themeMatch) { ED.theme = Number(themeMatch[1]) % THEMES.length; updateThemeBtn(); }
+  ED.reward = (look && look.name && look.skin) ? look : null;
+  updateLookBtn();
   document.getElementById("importBox").classList.add("hidden");
   drawEditor();
 }
@@ -526,10 +658,36 @@ document.getElementById("closeImportBtn").onclick = () => document.getElementByI
    it. The first time you save a new level we ask for a name and who
    made it; after that (and when editing an existing level) it just saves. */
 
+/* ----------------------------------------------------------------
+   A LEVEL WITH TOO MANY COINS. While you draw, the editor keeps you
+   inside the limit all by itself — so this only happens to a level
+   made BEFORE there was a limit (or one pasted in with Import). Those
+   keep working and stay playable; the limit only bites when somebody
+   saves them again, and then we ASK first. Nobody's coins ever vanish
+   without a "yes".
+
+   Answers true if it's fine to go ahead and save.
+   ---------------------------------------------------------------- */
+async function trimCoinsIfNeeded() {
+  const most = maxCoinsPerLevel();
+  const have = countCoins();
+  if (have <= most) return true;
+  const extra = have - most;
+  const ok = await askConfirm("This level has " + have + " coins, and " + most +
+    " is the most allowed. Save it with the first " + extra +
+    (extra === 1 ? " coin" : " coins") + " taken away?");
+  if (!ok) { showToast("Nothing saved."); return false; }
+  for (let i = 0; i < extra; i++) removeFirstCoin();
+  drawEditor();
+  return true;
+}
+
 // Actually send the current editor level to the server, then refresh the menu.
 async function saveToServer() {
+  if (!(await trimCoinsIfNeeded())) return;
   const body = { name: levelName(), author: ED.author, level: edToText(),
-                 song: ED.song, theme: ED.theme, messages: ED.messages };
+                 song: ED.song, theme: ED.theme, messages: ED.messages,
+                 reward: ED.reward };
   try {
     let created = null;
     if (ED.editingId != null) {
@@ -573,24 +731,34 @@ document.getElementById("saveConfirmBtn").onclick = () => {
 };
 document.getElementById("saveCancelBtn").onclick = () => document.getElementById("saveBox").classList.add("hidden");
 
-// Open a level from the menu for editing: load its grid, name, tune and theme
-// into the editor and show it.
+// Open a level from the menu for editing: load its grid, name, tune, theme
+// and look into the editor and show it.
 export function openLevelForEdit(L) {
   const parsed = parseLevel(L.level);
   edLoadGrid(parsed, L.messages);
   ED.editingId = L.id;                              // remember WHICH level we're changing
   ED.author = L.author || "";
+  ED.reward = L.reward || null;                     // the cube this level is played as
   ED.song = (L.song != null) ? (Number(L.song) % SONGS.length) : 0;
   ED.theme = (L.theme != null) ? (Number(L.theme) % THEMES.length) : 0;
   document.getElementById("levelNameInput").value = L.name;
   updateTuneBtn();
   updateThemeBtn();
-  S.screen = "editor"; showScreen("editorScreen"); drawEditor();
+  updateLookBtn();
+  S.screen = "editor"; showScreen("editorScreen"); layoutEditor();
 }
 
 // Start a brand-new, empty level. If this tablet knows who's playing, that's
 // the author already — no need to ask.
 export function openNewLevel() {
   ED.editingId = null; ED.author = getPlayerName() || "";
-  S.screen = "editor"; showScreen("editorScreen"); drawEditor();
+  ED.reward = null;                    // a new level has no look of its own yet
+  updateLookBtn();
+  S.screen = "editor"; showScreen("editorScreen"); layoutEditor();
+}
+
+// Come back to the editor after designing this level's look (main.js calls
+// this once the cube editor is finished with).
+export function backToEditor() {
+  S.screen = "editor"; showScreen("editorScreen"); layoutEditor();
 }

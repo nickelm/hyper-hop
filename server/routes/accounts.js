@@ -7,7 +7,9 @@
 // say "this was free".
 //
 // Being kind is the point here. Keeping a part the same is always
-// free, so the classic green cube costs nothing, forever.
+// free, so the classic green cube costs nothing, forever — and so is
+// any look you already own (see lib/looks.js), because you paid for
+// that one the first time.
 
 "use strict";
 
@@ -15,6 +17,7 @@ const express = require("express");
 const { ACCOUNTS_FILE, updateJson, indexById } = require("../lib/storage");
 const { validateAccountEdit } = require("../lib/validate");
 const { guard, can, meView } = require("../lib/auth");
+const { ownsLook, addLook } = require("../lib/looks");
 const { getPrices } = require("../lib/prices");
 const { NotFound, NotAllowed } = require("../lib/errors");
 
@@ -24,11 +27,17 @@ const router = express.Router();
    WHAT DID YOU CHANGE, AND WHAT DOES IT COST?
    We compare the cube you sent with the cube we have saved, part by
    part. Only the parts that are actually DIFFERENT cost anything.
+
+   And before any of that: a look you ALREADY OWN is free. You bought
+   it once (or a level gave it to you), so putting it back on never
+   costs a thing — that's the whole point of My Looks.
    ---------------------------------------------------------------- */
-function priceTheChanges(oldSkin, newSkin, skinPrices) {
+function priceTheChanges(account, newSkin, skinPrices) {
   const bought = [];
   let total = 0;
   if (!newSkin) return { bought, total };
+  if (ownsLook(account, newSkin)) return { bought, total };
+  const oldSkin = account.skin;
   for (const part of Object.keys(skinPrices)) {
     if (newSkin[part] !== (oldSkin || {})[part]) {
       bought.push({ part, price: skinPrices[part] });
@@ -62,13 +71,18 @@ router.put("/:id", guard, (req, res) => {
         throw new NotAllowed("Somebody already has that name — try another one!");
       }
 
-      const { bought, total } = priceTheChanges(account.skin, patch.skin, prices.skin);
+      const { bought, total } = priceTheChanges(account, patch.skin, prices.skin);
       if (total > account.coins) {
         const short = total - account.coins;
         throw new NotAllowed(
           "That cube costs " + total + " coins and you have " + account.coins +
           ". Go and grab " + short + " more — you're nearly there! 💪");
       }
+
+      // Paid for a new cube? Then it's yours to keep: it goes into My Looks,
+      // and wearing it again later is free forever. (addLook changes the saved
+      // player in place, so it rides along with the save below.)
+      if (total > 0) addLook(account, patch.skin, "", "shop");
 
       // MERGE onto the saved player — never rebuild them from scratch.
       // Everything we don't mention here (password, coins earned, which

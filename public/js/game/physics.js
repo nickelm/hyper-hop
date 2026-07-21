@@ -199,7 +199,7 @@ export function stepPhysics(state, dt) {
           if (player.vy >= 0 && prevBottom <= ty + 6) {
             player.y = ty - half; player.vy = 0; player.onGround = true;
             landRotation(player);
-          } else if (!player.onRamp) {
+          } else if (!player.onRamp && !rampBeside(state, col, row)) {
             die(state);                                 // hit the side or bottom
           }
         } else {
@@ -208,12 +208,14 @@ export function stepPhysics(state, dt) {
           if (player.vy <= 0 && prevTop >= ty + T - 6) {
             player.y = ty + T + half; player.vy = 0; player.onGround = true;
             landRotation(player);
-          } else if (!player.onRamp) {
+          } else if (!player.onRamp && !rampBeside(state, col, row)) {
             die(state);                                 // hit the side or top
           }
         }
         // If a ramp is holding us up (onRamp), a block beside us must NOT kill:
-        // the ramp is carrying us up the side of the stack onto its top.
+        // the ramp is carrying us up the side of the stack onto its top. And if
+        // we JUMPED off that ramp we are no longer "on" it, but we are still in
+        // the same corner — that's what rampBeside asks about.
       } else if (ch === "^") {
         // forgiving spike hitbox: a smaller box in the middle
         const m = T * CONFIG.SPIKE_MERCY;
@@ -330,6 +332,30 @@ export function requestJump(state) {
 function landRotation(player) {
   player.rot = (player.flipTo != null) ? player.flipTo : Math.round(player.rot / 90) * 90;
   player.flipTo = null;
+}
+
+// Is the cube on a ramp right NEXT DOOR to this block? A ramp's slope is lower
+// than the top of the block it climbs to, so a cube on the slope is always
+// poking a little way into that block — and the moment you JUMP, onRamp switches
+// off while you are still standing in that same corner. That's the ramp doing
+// its job, not a crash, so a block right beside a ramp must never kill you from
+// the side. Only the ramp family that matches the way gravity points counts
+// ( / \ normally, L 7 upside-down), just like the ramp pass above.
+//
+// It must be the SAME ROW, right next door: a block one row HIGHER is a real
+// wall, and running into that still ends the run.
+function rampBeside(state, col, row) {
+  const T = CONFIG.TILE, half = CONFIG.PLAYER_SIZE / 2, x = state.player.x;
+  const up = state.gravityDir;
+  const rampUp   = up > 0 ? "/"  : "L";
+  const rampDown = up > 0 ? "\\" : "7";
+  for (const c of [col - 1, col + 1]) {          // the square before and after the block
+    const ch = tileAt(state.level, c, row);
+    if (ch !== rampUp && ch !== rampDown) continue;
+    const tx = c * T;
+    if (x + half > tx && x - half < tx + T) return true;   // we're over that ramp
+  }
+  return false;
 }
 
 // You died. Mark it once and leave a note; the game loop makes the sound,

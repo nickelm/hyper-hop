@@ -5,14 +5,23 @@
 // a face, a trail, and an explosion, and watch a little cube run and
 // jump with your choices right away. "Save" stores it on the server.
 //
+// Underneath is MY LOOKS: every cube you have ever paid for, plus the
+// ones levels have given you. Tap one to put it back on — that never
+// costs anything, because you already own it.
+//
+// The page does one other job. The level editor borrows it to design
+// the cube a LEVEL is played as (see openSkinEditor's `opts`): same
+// controls, but nothing is bought and the answer goes back to the
+// level instead of to your account.
+//
 // Skins are LOOKS ONLY — nothing here changes how the game plays.
 
 import { CONFIG, DEFAULT_SKIN, SHAPES, FACES, TRAIL_STYLES, EXPLOSION_STYLES,
          SKIN_BODY_COLORS, SKIN_OUTLINE_COLORS, SKIN_FACE_COLORS } from "../config.js";
-import { hslToHex, normalizeSkin, drawPlayer } from "../game/player.js";
+import { hslToHex, normalizeSkin, drawPlayer, sameSkin } from "../game/player.js";
 import { drawTrail, spawnExplosion, renderParticles } from "../game/effects.js";
 import { apiWrite } from "../api.js";
-import { skinCost, balance, havePrices } from "../economy.js";
+import { skinCost, balance, havePrices, myLooks } from "../economy.js";
 import { showToast } from "./toast.js";
 
 // The bits of the game this page needs. main.js fills them in with initSkins().
@@ -36,20 +45,110 @@ export function initSkins(deps) {
 // that's what we compare against to work out what you're buying. It has to be a
 // copy: if it were the same object, it would change as you tap and everything
 // would look free!
-const SK = { id: null, name: "", skin: { ...DEFAULT_SKIN }, savedSkin: { ...DEFAULT_SKIN } };
+//
+// SK.mode is which job the page is doing: "me" (your own cube, which you buy)
+// or "level" (designing the cube a level is played as, which costs nothing).
+const SK = {
+  id: null, name: "", skin: { ...DEFAULT_SKIN }, savedSkin: { ...DEFAULT_SKIN },
+  mode: "me",
+  lookName: "",              // what a level's look is called ("The Crow")
+  onDone: null, onCancel: null,   // where the answer goes, in "level" mode
+};
+
+const lookNameInput = document.getElementById("skinLookName");
+const noLookBtn = document.getElementById("skinNoLookBtn");
 
 // Open the cube editor for a player (real, or a brand-new {id:null,...} one).
-export function openSkinEditor(profile) {
-  SK.id = profile.id != null ? profile.id : null;
-  SK.name = profile.name || "";
-  SK.skin = normalizeSkin(profile.skin);
+//
+// The level editor passes `opts` to borrow the page for a LEVEL's look:
+//   { forLevel: true, name, skin, onDone(reward), onCancel() }
+// where `reward` is {name, skin} — or null, meaning "this level has no look".
+export function openSkinEditor(profile, opts) {
+  const forLevel = !!(opts && opts.forLevel);
+  SK.mode = forLevel ? "level" : "me";
+  SK.id = profile && profile.id != null ? profile.id : null;
+  SK.name = (profile && profile.name) || "";
+  SK.skin = normalizeSkin(forLevel ? (opts.skin || profile && profile.skin) : profile.skin);
   SK.savedSkin = { ...SK.skin };          // a snapshot to price changes against
-  document.getElementById("skinTitle").textContent = SK.name ? (SK.name + "'s Cube") : "My Cube";
+  SK.lookName = forLevel ? (opts.name || "") : "";
+  SK.onDone = forLevel ? opts.onDone : null;
+  SK.onCancel = forLevel ? opts.onCancel : null;
+
+  document.getElementById("skinTitle").textContent = forLevel
+    ? "The level's look"
+    : (SK.name ? (SK.name + "'s Cube") : "My Cube");
+  // The name box and the "no look" button belong to a level's look only.
+  lookNameInput.value = SK.lookName;
+  lookNameInput.classList.toggle("hidden", !forLevel);
+  noLookBtn.classList.toggle("hidden", !forLevel);
+  document.getElementById("skinBackBtn").textContent = forLevel ? "← Editor" : "← Menu";
+
   buildSkinEditor();
+  buildLooksRow();
   updatePriceTag();
   S.screen = "skin";
   showScreen("skinScreen");
   startSkinPreview();
+}
+
+/* ================================================================
+   ========================  MY LOOKS  ============================
+   ================================================================
+   A row of little cubes: everything you own. Tap one to wear it —
+   it's free, because you already paid for it (or won it). A cube a
+   level gave you wears a 🏅 so you can spot your prizes.
+
+   There are no names here on purpose: a row of cubes says what it is
+   far better than a row of words does, and the kids pick theirs out
+   by sight anyway. */
+const lookBtns = [];              // the buttons, so we can move the highlight about
+
+function buildLooksRow() {
+  const row = document.getElementById("looksRow");
+  const wrap = document.getElementById("looksWrap");
+  row.innerHTML = "";
+  lookBtns.length = 0;
+  const looks = myLooks();
+  // Nothing to show until you own a second cube — one lonely square is
+  // just clutter.
+  wrap.classList.toggle("hidden", looks.length < 2);
+  document.getElementById("looksHint").textContent = SK.mode === "level"
+    ? "My Looks — tap one to build the level's look from it"
+    : "My Looks — tap one to wear it again (free)";
+
+  for (const look of looks) {
+    const btn = document.createElement("button");
+    btn.className = "lookBtn";
+    const cv = document.createElement("canvas");
+    cv.width = 48; cv.height = 48;
+    btn.appendChild(cv);
+    if (look.from === "level") {              // a prize from a level
+      const badge = document.createElement("div");
+      badge.className = "lookBadge";
+      badge.textContent = "🏅";
+      badge.title = look.name || "";
+      btn.appendChild(badge);
+    }
+    btn.onclick = () => {
+      SK.skin = normalizeSkin(look.skin);
+      buildSkinEditor();                      // move every "selected" mark to match
+      updatePriceTag();
+    };
+    lookBtns.push({ btn, look });
+    row.appendChild(btn);
+    // Draw it AFTER the button is in the page, so the canvas has a size.
+    const c = cv.getContext("2d");
+    drawPlayer(c, cv.width / 2, cv.height / 2, 0, normalizeSkin(look.skin), cv.width * 0.62);
+  }
+  markSelectedLook();
+}
+
+// Light up whichever look matches the cube on the screen right now. This runs
+// on every tap, so it only ever moves a highlight — it never redraws the cubes.
+function markSelectedLook() {
+  for (const { btn, look } of lookBtns) {
+    btn.classList.toggle("selected", sameSkin(look.skin, SK.skin));
+  }
 }
 
 /* ----------------------------------------------------------------
@@ -62,13 +161,28 @@ function updatePriceTag() {
   const saveBtn = document.getElementById("skinSaveBtn");
   const tag = document.getElementById("skinPrice");
   if (!saveBtn) return;
+  markSelectedLook();          // keep My Looks in step with the cube on screen
+
+  // A level's look isn't bought by anybody, so there's no price to show.
+  if (SK.mode === "level") {
+    saveBtn.textContent = "⇩ Use this look";
+    saveBtn.disabled = false;
+    if (tag) tag.textContent = "Everybody plays this level as this cube — and keeps it when they finish it.";
+    return;
+  }
 
   const { items, total } = skinCost(SK.savedSkin, SK.skin);
 
   if (!havePrices() || total === 0) {
     saveBtn.textContent = "⇩ Save";
     saveBtn.disabled = false;
-    if (tag) tag.textContent = havePrices() ? "No changes — free!" : "";
+    // Free for one of two reasons: you changed nothing, or this is a cube
+    // you already own. Say which — "free!" is nicer when you know why.
+    if (tag) {
+      tag.textContent = !havePrices() ? ""
+        : sameSkin(SK.skin, SK.savedSkin) ? "No changes — free!"
+        : "You've already got this one — free!";
+    }
     return;
   }
 
@@ -247,7 +361,17 @@ function previewDeath() {
 // Save the cube — which is also BUYING it, if you changed anything.
 // The server adds up the real price and takes the coins; if you can't
 // afford it, it says so kindly and nothing is charged.
+//
+// In "level" mode nothing is bought and nothing is sent anywhere: the
+// look simply goes back to the level editor, which saves it with the level.
 async function saveSkin() {
+  if (SK.mode === "level") {
+    const name = lookNameInput.value.trim();
+    if (!name) { showToast("Give the look a name first — like The Crow!"); return; }
+    SK.onDone({ name, skin: normalizeSkin(SK.skin) });
+    return;
+  }
+
   const me = getMe();
   if (!me) { showToast("Log in first to save your cube!"); return; }
   const body = { name: SK.name, skin: normalizeSkin(SK.skin) };
@@ -262,6 +386,11 @@ async function saveSkin() {
 }
 
 document.getElementById("skinSaveBtn").onclick = saveSkin;
-document.getElementById("skinBackBtn").onclick = () => { S.screen = "menu"; showScreen("menuScreen"); };
+// "No look" takes a level's cube away again, so it's played as whoever you are.
+noLookBtn.onclick = () => { if (SK.mode === "level") SK.onDone(null); };
+document.getElementById("skinBackBtn").onclick = () => {
+  if (SK.mode === "level") { SK.onCancel(); return; }   // back to the level, unchanged
+  S.screen = "menu"; showScreen("menuScreen");
+};
 document.getElementById("skinDeathBtn").onclick = previewDeath;
 document.getElementById("skinPreview").addEventListener("pointerdown", e => { e.stopPropagation(); previewJump(); });

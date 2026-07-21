@@ -14,6 +14,7 @@
 const { ACCOUNTS_FILE, readJson } = require("./storage");
 const { SESSION_COOKIE, readCookie } = require("./cookies");
 const { accountIdForToken } = require("./sessions");
+const { looksOf } = require("./looks");
 
 const READ_ONLY = process.env.READ_ONLY === "true";
 
@@ -136,12 +137,15 @@ function publicAccount(a) {
 }
 
 // The fuller version, only ever sent to YOU: adds which coins you've
-// already been paid for, and what you're allowed to do.
+// already been paid for, every cube you own, and what you're allowed to do.
+// (Your collection of looks is nobody else's business, so it is NOT in
+// publicAccount — the login screen only ever needs the cube you're wearing.)
 function meView(a) {
   if (!a) return null;
   return {
     ...publicAccount(a),
     collectedCoins: a.collectedCoins || {},
+    looks: looksOf(a),
     powers: [...powersOf(a)],
   };
 }
