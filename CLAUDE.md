@@ -82,6 +82,10 @@ break existing level strings.
 L  ceiling up-ramp   (the mirror of `/`, hanging from the roof; only while gravity is flipped)
 7  ceiling down-ramp (the mirror of `\`, likewise)
 ^  spike (death; forgiving inner hitbox, see CONFIG.SPIKE_MERCY)
+v  upside-down spike — the mirror of `^`, hanging point-down from the top of its square.
+   Deadly **always**, whichever way gravity points: a spike is a hazard, not a surface, so
+   unlike the ceiling ramps `L`/`7` there is no "only while flipped" rule. Same SPIKE_MERCY,
+   same color; the one difference is which end of the hitbox is flush with the square.
 o  bounce pad (launches upward at CONFIG.PAD_POWER)
 *  coin (collectible; a level may hold at most `maxCoinsPerLevel` of them — see Coin cap)
 |  finish line
@@ -712,7 +716,7 @@ later, and compared with `timingSafeEqual`. Five wrong guesses locks that name f
 password give the *same* message, so guessing can't discover who exists.
 
 Server-side level validation (`lib/validate.js`, returns clear messages): only the
-characters `. # ^ o * | / \ L 7 = - p U s @ ! > < u n f c h g`, all rows equal length,
+characters `. # ^ v o * | / \ L 7 = - p U s @ ! > < u n f c h g`, all rows equal length,
 at most one `|`, ≤ 500 columns, ≤ 30 rows, and at most `maxCoinsPerLevel` coins.
 The allowed-character list is defined
 **once** (`LEVEL_CHARS`) and the error message is generated from it, so the two
@@ -818,6 +822,10 @@ Two automatic checks, both run by `npm test`:
   kill; pads and ramps do nothing; a `u` mid-flight reverses the thrust; a `@`
   inside a flight section respawns you **flying**; after `c` the cube jumps and
   spins again.
+- Upside-down spikes (`v`): a row of them along the roof kills when you jump up
+  into it and is harmless to run underneath — and it still kills after a `u`, when
+  you are running along the roof and meet it from the other side. Its mercy feels
+  the same as a floor spike's.
 - Ceiling ramps (`L` `7`): after a `u`, the cube runs up an `L` and down a `7`
   along the roof without dying, and a jump still beats the glue. With gravity
   normal, `L` and `7` do nothing at all (and still never kill); with gravity

@@ -90,6 +90,7 @@ const TOOLS = [
   { ch: "L",  icon: "\u25e5", label: "up ramp \u2191" },   // \u25e5 upper-right triangle: a ceiling ramp
   { ch: "7",  icon: "\u25e4", label: "down ramp \u2191" }, // \u25e4 upper-left triangle: the other one
   { ch: "^", icon: "\u25B2", label: "spike" },
+  { ch: "v", icon: "\u25BC", label: "spike \u2191" },  // \u25BC down triangle: a spike hanging from the roof
   { ch: "o", icon: "\u2B24", label: "pad" },
   { ch: "*", icon: "\u2605", label: "coin" },
   { ch: "|", icon: "\uD83C\uDFC1", label: "finish" },
@@ -203,9 +204,12 @@ function drawEditor() {
       else                  { eCtx.moveTo(x, y); eCtx.lineTo(x+c, y); eCtx.lineTo(x, y+c); }
       eCtx.closePath(); eCtx.fill();
     }
-    else if (ch === "^") {
+    else if (ch === "^" || ch === "v") {
+      // a floor spike, and its upside-down twin that hangs from the roof
       eCtx.fillStyle = CONFIG.SPIKE_COLOR;
-      eCtx.beginPath(); eCtx.moveTo(x+c/2, y+3); eCtx.lineTo(x+c-3, y+c-3); eCtx.lineTo(x+3, y+c-3);
+      eCtx.beginPath();
+      if (ch === "^") { eCtx.moveTo(x+c/2, y+3);   eCtx.lineTo(x+c-3, y+c-3); eCtx.lineTo(x+3, y+c-3); }
+      else            { eCtx.moveTo(x+c/2, y+c-3); eCtx.lineTo(x+c-3, y+3);   eCtx.lineTo(x+3, y+3); }
       eCtx.closePath(); eCtx.fill();
     }
     else if (ch === "o") { eCtx.fillStyle = CONFIG.PAD_COLOR; eCtx.fillRect(x+4, y+c-10, c-8, 6); }

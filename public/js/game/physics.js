@@ -216,10 +216,14 @@ export function stepPhysics(state, dt) {
         // the ramp is carrying us up the side of the stack onto its top. And if
         // we JUMPED off that ramp we are no longer "on" it, but we are still in
         // the same corner — that's what rampBeside asks about.
-      } else if (ch === "^") {
-        // forgiving spike hitbox: a smaller box in the middle
+      } else if (ch === "^" || ch === "v") {
+        // forgiving spike hitbox: a smaller box in the middle. A  v  is simply a
+        // ^  turned upside down — it hangs from the TOP of its square instead of
+        // standing on the bottom — so the only difference is which end of the box
+        // is flush with the square. Both kill whichever way gravity is pointing.
         const m = T * CONFIG.SPIKE_MERCY;
-        const hx = tx + m, hw = T - 2 * m, hy = ty + m, hh = T - m;
+        const hx = tx + m, hw = T - 2 * m;
+        const hy = ch === "^" ? ty + m : ty, hh = T - m;
         if (player.x + half > hx && player.x - half < hx + hw &&
             player.y + half > hy && player.y - half < hy + hh) die(state);
       } else if (ch === "s") {

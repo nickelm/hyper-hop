@@ -45,6 +45,7 @@ import {
        /  = ramp up   (run up the slope — a ramp is never deadly)
        \  = ramp down (slide down the slope — a ramp is never deadly)
        ^  = spike (deadly!)
+       v  = spike hanging from the roof (the same, upside down — deadly!)
        o  = bounce pad (launches you high)
        *  = coin (collect it!)
        |  = finish line (you win!)

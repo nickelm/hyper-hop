@@ -20,7 +20,9 @@ import { CONFIG } from "../config.js";
      L  up-ramp     7  down-ramp     (the same, for the CEILING: they only
                                       work while gravity is flipped)
      !  sign        (a message for the player; the words live in level.messages)
-     ^  spike        s  saw blade    (both deadly)
+     ^  spike        v  spike hanging from the roof (the same, upside down)
+     s  saw blade                    (all three are deadly, whichever way
+                                      gravity happens to be pointing)
      o  bounce pad   p  small pad     U  catapult   (launch you up)
      *  coin          @  checkpoint   |  finish line
      =  jump-through platform   -  disappearing bridge

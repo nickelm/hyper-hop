@@ -205,9 +205,14 @@ export function draw(view, dt) {
         // a sign: remember it and draw it AFTER all the tiles, so nothing
         // in the next column can scribble over the words.
         signs.push({ x, y, text: messageAt(S.level, col, row) });
-      } else if (ch === "^") {
+      } else if (ch === "^" || ch === "v") {
+        // a spike: a triangle with a white edge. A  v  is the same triangle turned
+        // upside down — it hangs point-down from the roof instead of standing up
+        // from the floor. Same color, so it reads as obviously the same danger.
         ctx.fillStyle = CONFIG.SPIKE_COLOR;
-        ctx.beginPath(); ctx.moveTo(x + T/2, y + 2); ctx.lineTo(x + T - 3, y + T); ctx.lineTo(x + 3, y + T);
+        ctx.beginPath();
+        if (ch === "^") { ctx.moveTo(x + T/2, y + 2);     ctx.lineTo(x + T - 3, y + T); ctx.lineTo(x + 3, y + T); }
+        else            { ctx.moveTo(x + T/2, y + T - 2); ctx.lineTo(x + T - 3, y);     ctx.lineTo(x + 3, y); }
         ctx.closePath(); ctx.fill();
         ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
       } else if (ch === "s") {

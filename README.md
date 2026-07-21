@@ -67,6 +67,7 @@ Levels are ASCII grids, one character per tile:
 .  empty air
 #  solid block (stand on top; hitting the side = death)
 ^  spike (death; has a forgiving inner hitbox)
+v  upside-down spike (the same, hanging from the roof instead)
 o  bounce pad (launches you upward)
 *  coin (collectible)
 |  finish line (you win!)

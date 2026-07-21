@@ -13,7 +13,7 @@
 // The ONE list of tiles a level is allowed to use. Everything that
 // checks or describes level tiles reads from this, so there is a
 // single source of truth.
-const LEVEL_CHARS = new Set([".", "#", "^", "o", "*", "|", "/", "\\", "L", "7", "=", "-", "p", "U", "s", "@", "!", ">", "<", "u", "n", "f", "c", "h", "g"]);
+const LEVEL_CHARS = new Set([".", "#", "^", "v", "o", "*", "|", "/", "\\", "L", "7", "=", "-", "p", "U", "s", "@", "!", ">", "<", "u", "n", "f", "c", "h", "g"]);
 const LEVEL_CHARS_HELP = [...LEVEL_CHARS].join(" ");   // "‎. # ^ o * | / \ = - ..." for error messages
 const MAX_COLS = 500;
 const MAX_ROWS = 30;
