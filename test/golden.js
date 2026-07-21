@@ -34,7 +34,7 @@ function newState(hh, fixture) {
   const camX = -T * 5;                          // little run-up before the level starts
   return {
     level: hh.parseLevel(fixture.level),
-    player: { x: camX + T * 2, y: 0, vy: 0, rot: 0, onGround: true, onRamp: 0, dead: false, won: false },
+    player: { x: camX + T * 2, y: 0, vy: 0, rot: 0, onGround: true, onRamp: 0, flipTo: null, dead: false, won: false },
     camX: camX,
     speedMult: 1,
     gravityDir: 1,

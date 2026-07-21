@@ -25,6 +25,7 @@ const PANEL_SLIDERS = [
   ["JUMP_POWER",   "Jump power",   800, 3500, 50],
   ["PAD_POWER",    "Bounce pad power", 600, 2500, 50],
   ["SPIN_SPEED",   "Spin speed",   0, 900, 10],
+  ["CAMERA_X",     "Camera position (0 = left edge, 0.5 = middle)", 0.1, 0.5, 0.01],
   ["TILE",         "Tile size",    24, 64, 1],
   ["PLAYER_SIZE",  "Cube size",    16, 60, 1],
   ["SPIKE_MERCY",  "Spike mercy",  0, 0.5, 0.05],

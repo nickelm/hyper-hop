@@ -33,6 +33,7 @@ export function stepPhysics(state, dt) {
   const T = CONFIG.TILE, half = CONFIG.PLAYER_SIZE / 2;
 
   const prevX = player.x;                    // remember where we were, for portal crossings
+  const wasOnGround = player.onGround;       // ...and whether we had our feet down, for the flip
   player.x += CONFIG.SCROLL_SPEED * state.speedMult * dt;
   state.camX += CONFIG.SCROLL_SPEED * state.speedMult * dt;
   if (state.flying) {
@@ -80,6 +81,9 @@ export function stepPhysics(state, dt) {
     player.rot = Math.max(-CONFIG.FLY_TILT, Math.min(CONFIG.FLY_TILT, tip));
   } else if (!player.onGround) {
     player.rot += CONFIG.SPIN_SPEED * dt;
+    // Dropping off the edge of a block is one tidy quarter-turn, not a free
+    // spin: flipTo is the angle we stop at (see the bottom of this function).
+    if (player.flipTo != null && player.rot > player.flipTo) player.rot = player.flipTo;
   }
 
   player.onGround = false;
@@ -102,12 +106,12 @@ export function stepPhysics(state, dt) {
   } else if (groundIsFloor) {
     if (floorSolid && player.y + half >= 0) {
       player.y = -half; player.vy = 0; player.onGround = true;
-      player.rot = Math.round(player.rot / 90) * 90;
+      landRotation(player);
     }
   } else {
     if (roofSolid && player.y - half <= yCeil) {
       player.y = yCeil + half; player.vy = 0; player.onGround = true;
-      player.rot = Math.round(player.rot / 90) * 90;
+      landRotation(player);
     }
   }
 
@@ -163,15 +167,26 @@ export function stepPhysics(state, dt) {
       if (ch === "#") {
         if (!overlapX || !overlapY) continue;
         if (state.flying) {
-          // Flying, a block is just something to steer around: touching one at
-          // all is the end of the run. You can't land on top of it in a rocket.
-          if (!player.onRamp) die(state);
+          // Flying, a block's top and underside are soft walls, just like the
+          // floor and the roof of the world: you scrape along them and stop, and
+          // you never die on them. Its SIDES are still the end of the run.
+          // Notice we never set onGround — a rocket doesn't land on things, and
+          // that one fact is what stops a tap from becoming a jump.
+          const prevBottom = player.y + half - player.vy * dt;
+          const prevTop    = player.y - half - player.vy * dt;
+          if (player.vy >= 0 && prevBottom <= ty + 6) {
+            player.y = ty - half; player.vy = 0;        // scraping along the top
+          } else if (player.vy <= 0 && prevTop >= ty + T - 6) {
+            player.y = ty + T + half; player.vy = 0;    // bonking the underside
+          } else {
+            die(state);                                 // flew into the side
+          }
         } else if (state.gravityDir > 0) {
           // normal: land on the TOP if we were above it last step and falling down
           const prevBottom = player.y + half - player.vy * dt;
           if (player.vy >= 0 && prevBottom <= ty + 6) {
             player.y = ty - half; player.vy = 0; player.onGround = true;
-            player.rot = Math.round(player.rot / 90) * 90;
+            landRotation(player);
           } else if (!player.onRamp) {
             die(state);                                 // hit the side or bottom
           }
@@ -180,7 +195,7 @@ export function stepPhysics(state, dt) {
           const prevTop = player.y - half - player.vy * dt;
           if (player.vy <= 0 && prevTop >= ty + T - 6) {
             player.y = ty + T + half; player.vy = 0; player.onGround = true;
-            player.rot = Math.round(player.rot / 90) * 90;
+            landRotation(player);
           } else if (!player.onRamp) {
             die(state);                                 // hit the side or top
           }
@@ -227,18 +242,22 @@ export function stepPhysics(state, dt) {
         // and pass right through it the other way. It never kills. While flying
         // you sail straight through it — a rocket doesn't land on things.
         if (overlapX && !state.flying) {
+          // You land only if you actually REACHED the slab this step: you were
+          // above it a moment ago and you have just touched it. Without that
+          // second half you would be snatched down onto it from any height, and
+          // a jump over a bridge would look like it got cut short.
           if (state.gravityDir > 0) {                   // normal: land on the top
             const prevBottom = player.y + half - player.vy * dt;
-            if (player.vy >= 0 && prevBottom <= ty + 6) {
+            if (player.vy >= 0 && player.y + half >= ty && prevBottom <= ty + 6) {
               player.y = ty - half; player.vy = 0; player.onGround = true;
-              player.rot = Math.round(player.rot / 90) * 90;
+              landRotation(player);
             }
           } else {                                      // flipped: land on the underside
             const slabBot = ty + T / 3;                 // the slab sits in the top third
             const prevTop = player.y - half - player.vy * dt;
-            if (player.vy <= 0 && prevTop >= slabBot - 6) {
+            if (player.vy <= 0 && player.y - half <= slabBot && prevTop >= slabBot - 6) {
               player.y = slabBot + half; player.vy = 0; player.onGround = true;
-              player.rot = Math.round(player.rot / 90) * 90;
+              landRotation(player);
             }
           }
         }
@@ -257,6 +276,15 @@ export function stepPhysics(state, dt) {
   if (!state.flying && wasOnRampUp && !player.onGround && player.vy >= 0) {
     player.vy = -CONFIG.RAMP_LAUNCH * CONFIG.SCROLL_SPEED;
   }
+
+  // Just walked off the edge of a block? That's one tidy quarter-turn, not a
+  // free spin. A jump, a pad, a catapult or a ramp pop all send you UP, so those
+  // still spin the whole way round. (Multiplying by gravityDir asks "are we
+  // heading DOWNWARDS?" in a way that works upside-down too.)
+  if (!state.flying && wasOnGround && !player.onGround && player.vy * state.gravityDir >= 0) {
+    player.flipTo = Math.round(player.rot / 90) * 90 + 90;   // the next quarter-turn along
+  }
+  if (player.onGround) player.flipTo = null;                 // feet down: ready for the next drop
 
   // fell past end of level with no finish line? win anyway
   if (player.x / T > state.level.cols + 3) win(state);
@@ -283,6 +311,14 @@ export function requestJump(state) {
 }
 
 // ---------------- Internals ----------------
+
+// You landed. Line the cube back up with the world — and if it was part-way
+// through a quarter-turn from dropping off a block, finish that turn, so every
+// drop ends as a neat 90° flip.
+function landRotation(player) {
+  player.rot = (player.flipTo != null) ? player.flipTo : Math.round(player.rot / 90) * 90;
+  player.flipTo = null;
+}
 
 // You died. Mark it once and leave a note; the game loop makes the sound,
 // shakes the screen, and explodes the cube.

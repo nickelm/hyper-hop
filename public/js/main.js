@@ -164,7 +164,7 @@ function resetRun() {
   attempts++;
   document.getElementById("attempts").textContent = "Attempt " + attempts;
   const T = CONFIG.TILE;
-  player = { x: 0, y: 0, vy: 0, rot: 0, onGround: true, onRamp: 0, dead: false, won: false };
+  player = { x: 0, y: 0, vy: 0, rot: 0, onGround: true, onRamp: 0, flipTo: null, dead: false, won: false };
   camX = -T * 5;                       // little run-up before the level starts
   player.x = camX + T * 2;
   particles = []; trail = []; shake = 0; winT = 0; deadT = 0;
@@ -213,7 +213,7 @@ function removeCheckpoint() {
 function restoreCheckpoint() {
   const cp = checkpoints[checkpoints.length - 1];
   player = { x: cp.x, y: cp.y, vy: cp.vy, rot: cp.rot,
-             onGround: cp.onGround, dead: false, won: false };
+             onGround: cp.onGround, flipTo: null, dead: false, won: false };
   camX = cp.camX;
   coinsGot = new Set(cp.coins);
   speedMult = (cp.speedMult != null) ? cp.speedMult : 1;   // restore the speed too
@@ -236,7 +236,7 @@ function restoreTileCheckpoint() {
   attempts++;
   document.getElementById("attempts").textContent = "Attempt " + attempts;
   player = { x: cp.x, y: cp.y, vy: cp.vy, rot: cp.rot,
-             onGround: cp.onGround, onRamp: 0, dead: false, won: false };
+             onGround: cp.onGround, onRamp: 0, flipTo: null, dead: false, won: false };
   camX = cp.camX;
   coinsGot = new Set(cp.coins);
   speedMult = cp.speedMult;            // back to the speed you had at the checkpoint

@@ -125,8 +125,13 @@ vertical speed is clamped to ±CONFIG.FLY_MAX_SPEED. While flying:
   them with `vy = 0`, never dies, and **never sets `onGround`**. That one fact is
   what keeps a tap from becoming a jump and stops the hold-to-keep-jumping timer
   in `input.js` from firing; `requestJump` also returns `false` outright.
-- spikes and saws still kill, and a `#` block kills on **any** overlap — you
-  cannot land on things in a rocket.
+- a `#` block's **top and underside are soft walls too**, by the same rule: the
+  rocket scrapes along them with `vy = 0`, stays alive, and still never sets
+  `onGround` (so it rests on a block without being able to jump off it). Its
+  **sides** are the end of the run. Which one you hit is decided the same way a
+  cube's landing is — were you moving down onto the top, or up into the underside,
+  and were you clear of it a step ago?
+- spikes and saws still kill.
 - pads, catapults and ramps do nothing; `=`/`-` platforms are pass-through
   (bridges still fade as you fly past).
 - the cube tips its nose toward its vertical speed (±CONFIG.FLY_TILT) instead of
@@ -178,7 +183,10 @@ scrollable box makes the box impossible to scroll on a tablet.
 
 Jump-through platforms (`=` `-`) are one-way: the cube lands on the top when
 falling, but passes straight through them from below and from the sides, and they
-never kill. The `-` bridge is a `=` that fades out after the cube runs past it
+never kill. Landing needs **both** halves of the test — you were above the slab a
+step ago *and* you have actually reached it now. (With only the first half, any
+cube falling anywhere over that column was snatched down onto the slab, which read
+as a jump being cut short.) The `-` bridge is a `=` that fades out after the cube runs past it
 (purely a look — a faded bridge still holds you up); bridges reset to solid on death
 or respawn.
 
@@ -189,6 +197,17 @@ micro-hop (CONFIG.RAMP_GLUE). A jump always overrides the glue. A `/` at the foo
 a block stack lets the cube run up onto the stack instead of dying on its side. In
 stored JSON and in the server's seed levels, a down-ramp `\` must be written as
 `\\` so a literal backslash survives encoding.
+
+**Spinning.** In the air the cube turns at `CONFIG.SPIN_SPEED` and lines back up
+with the world when it lands. Two different things happen, though: a jump, a pad,
+a catapult or a ramp pop sends you **upward**, and those spin freely the whole way
+round; simply **running off the edge** of a block is one tidy quarter-turn — the
+cube turns 90° and then holds that angle until it lands, however far it falls.
+`player.flipTo` is the angle it stops at (`null` = spin freely), set at the end of
+a step when you left the ground without heading upward, and cleared the moment you
+land. Landing goes through `landRotation()`, which finishes an unfinished
+quarter-turn rather than snapping to the nearest 90°. Sliding on a ramp is not
+falling, so it never flips — a ramp just tilts the cube ±45°.
 
 The floor is implicit: the bottom row of the grid sits on an automatic ground
 plane. Rows are top-to-bottom; all rows in a level must be the same length.
@@ -281,6 +300,14 @@ around the world layer so tiles, outlines, glyphs and particles all scale
 together. There is no camera Y and no follow/smoothing state to reset. World
 coordinates: floor at y = 0, up is negative y. The HUD and the overlays are drawn
 after that transform is popped, so they are never zoomed or shaken.
+
+Sideways, the camera is worked out **from the cube**, not from `camX`:
+`camLeft = player.x - W * CONFIG.CAMERA_X / zoom` is the world x at the left edge
+of the screen, so the cube sits the same fraction of the way across on a little
+phone and on a big tablet (`CAMERA_X: 0.33` ≈ a third). `camX` is still the
+physics' own "how far the world has scrolled" — it drives the parallax dots and
+rides along in the checkpoint snapshots — but it no longer decides where the cube
+is drawn. Note the trade: a bigger `CAMERA_X` means less warning of what's ahead.
 
 `physics.js` is pure, so `main.js` bridges it to the game with two small **live
 views** of its variables — reading or writing a field on them reads or writes the
@@ -552,9 +579,17 @@ Two automatic checks, both run by `npm test`:
   ground back and you can land on it. Upside-down (after a `u`) an `h` takes the
   ROOF away instead and you fall upward out of the world.
 - Flying (`f` … `c`): holding climbs and letting go drops; the cube scrapes the
-  floor and the roof without dying; spikes, saws and block *sides* still kill;
-  pads and ramps do nothing; a `u` mid-flight reverses the thrust; a `@` inside a
-  flight section respawns you **flying**; after `c` the cube jumps and spins again.
+  floor, the roof, and the top and underside of a `#` block without dying (and
+  cannot jump off a block it is resting on); spikes, saws and block *sides* still
+  kill; pads and ramps do nothing; a `u` mid-flight reverses the thrust; a `@`
+  inside a flight section respawns you **flying**; after `c` the cube jumps and
+  spins again.
+- Jumping right over a `=` or a `-`: the arc reaches its full height instead of
+  being snatched down onto the slab, and landing on the slab still works.
+- Running off the edge of a block gives exactly one 90° flip, held until landing;
+  a jump still spins freely; a `\` ramp still just tilts the cube.
+- The cube sits about a third of the way across the screen, on a big tablet and a
+  small phone alike (`CONFIG.CAMERA_X`).
 - Holding thrust for several seconds on a tablet does not select text, scroll, or
   pop the magnifier; sliding a finger off the screen stops the rocket.
 - A short old level still looks right with the taller sky (more room above, world

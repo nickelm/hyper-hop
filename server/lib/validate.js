@@ -44,7 +44,7 @@ const MAX_NAME = 20;                 // a player name is 1–20 letters
 // The full list of CONFIG names the settings file is allowed to override.
 // (This must stay in sync with the CONFIG block in public/index.html.)
 const KNOWN_SETTING_KEYS = new Set([
-  "SCROLL_SPEED", "GRAVITY", "JUMP_POWER", "PAD_POWER", "SPIN_SPEED",
+  "SCROLL_SPEED", "GRAVITY", "JUMP_POWER", "PAD_POWER", "SPIN_SPEED", "CAMERA_X",
   "SMALL_PAD_POWER", "CATAPULT_POWER",
   "RAMP_LAUNCH", "RAMP_GLUE", "BRIDGE_FADE_TIME",
   "FAST_MULT", "SLOW_MULT",

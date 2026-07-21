@@ -86,10 +86,14 @@ export function draw(view, dt) {
   ctx.save();
   ctx.translate(0, floorY);
   ctx.scale(zoom, zoom);
-  const sx = wx => (wx - camX);
+  // The camera: the cube sits CONFIG.CAMERA_X of the way across the screen. We
+  // measure from the cube itself, so it sits in the same spot on a little phone
+  // and on a big tablet.
+  const camLeft = player.x - (W * CONFIG.CAMERA_X) / zoom;   // world x at the screen's left edge
+  const sx = wx => (wx - camLeft);
   const sy = wy => wy;
 
-  const colStart = Math.floor(camX / T) - 1, colEnd = Math.floor((camX + W / zoom) / T) + 1;
+  const colStart = Math.floor(camLeft / T) - 1, colEnd = Math.floor((camLeft + W / zoom) / T) + 1;
 
   /* ---- the ground ----
      Drawn column by column, because an  h  gate can switch it off and leave a
