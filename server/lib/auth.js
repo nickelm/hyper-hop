@@ -25,7 +25,7 @@ const READ_ONLY = process.env.READ_ONLY === "true";
 
      player  makes their own levels, and may change their own stuff
      editor  a player who may also fix ANYBODY's level
-     admin   an editor who also runs the world (settings, level order)
+     admin   an editor who also runs the world (level order, accounts)
 
    To change somebody's job, open data/accounts.json in a text editor
    and change their "role" — then restart the server. There's no
@@ -35,7 +35,7 @@ const ROLE_POWERS = {
   player: ["level.create", "level.editOwn", "level.deleteOwn", "me.edit", "run.report"],
 };
 ROLE_POWERS.editor = [...ROLE_POWERS.player, "level.editAny", "level.deleteAny"];
-ROLE_POWERS.admin = [...ROLE_POWERS.editor, "settings.edit", "level.reorder", "account.editAny"];
+ROLE_POWERS.admin = [...ROLE_POWERS.editor, "level.reorder", "account.editAny"];
 
 // Everything this player is allowed to do: the powers that come with
 // their job, PLUS any extra ones written by hand in their
@@ -73,7 +73,7 @@ function can(account, action, thing) {
       return powers.has("account.editAny") ||
         (powers.has("me.edit") && !!thing && Number(thing.id) === Number(account.id));
     default:
-      return powers.has(action);      // create / reorder / settings / run
+      return powers.has(action);      // create / reorder / run
   }
 }
 

@@ -10,9 +10,9 @@ browsers.
 
 It is a small **client–server app**: a vanilla HTML/CSS/JS game (in `public/`)
 talking to a tiny **Node + Express** server that stores everyone's levels,
-accounts, coins and shared settings in flat JSON files. This lets the kids save
-levels and settings straight from their tablets, no laptop or git in the loop. It
-runs on a DigitalOcean droplet (see `deploy/`).
+accounts and coins in flat JSON files. This lets the kids save levels straight
+from their tablets, no laptop or git in the loop. It runs on a DigitalOcean
+droplet (see `deploy/`).
 
 Everyone has an **account** with a password, and playing earns **coins** that buy
 cosmetic bits for your cube. The security is family-grade — but the fundamentals
@@ -30,6 +30,9 @@ The code is split into small **ES modules** — one job per file, no build step.
 2. **All tunables live in `CONFIG`** (`public/js/config.js`). Never hardcode a magic
    number in the engine if it could be a named constant there. When adding a
    feature, add its parameters to CONFIG with a kid-friendly comment.
+   **CONFIG is the one and only place these numbers are set** — there is no
+   server-wide override any more (there used to be; see "A level's own rules").
+   A *level* may borrow a few of them while you play it, and that's all.
    **The one exception is money.** What things *cost* lives in `data/prices.json`
    on the server (hand-editable, hot-reloaded — the same spirit as CONFIG, just
    server-side), because `config.js` is sent to the tablets and anyone could edit
@@ -43,7 +46,7 @@ The code is split into small **ES modules** — one job per file, no build step.
    `node server/server.js`. Passwords use Node's built-in `crypto` (scrypt) and
    cookies are parsed by hand (`lib/cookies.js`) rather than adding a package.
 4. **The server owns everything that matters; the tablet owns almost nothing.**
-   Levels, accounts, coins, scores and shared settings live on the server
+   Levels, accounts, coins and scores live on the server
    (`data/*.json`) and are reached through the API below. Your login is an
    **httpOnly cookie** — the game's own JavaScript cannot read it, so nothing on
    the page can steal it. **Coins are server-authoritative:** the client reports
@@ -319,6 +322,63 @@ in normal cube play there is no ceiling at all. Because the grid itself is never
 padded, row indices, `"col,row"` coin keys and stored level strings are unaffected
 — which keeps the client in step with the server's `coinKeysFor()`.
 
+## A level's own rules
+
+A level may **bend some of the game's numbers while you are inside it** — moon
+gravity, a giant jump, a fiercer rocket. They live beside the grid in the level's
+`rules`, a flat little map of CONFIG name → number (`{"GRAVITY": 1500}`), the
+same shape `settings.json` used to have. **Only the numbers a level actually
+changes are stored**, so a level with no `rules` (every level made before this
+existed) plays exactly as it always did.
+
+There used to be a *world-wide* version of this — a ★ "Save for everyone" button
+writing `data/settings.json`. **That is gone.** One shared set of numbers meant a
+moon level and a heavy level could not both exist, and one tap changed the game
+for everybody. `CONFIG` in `js/config.js` is now simply *the* numbers; a level is
+the only thing that may bend them, and only for as long as you are playing it.
+
+**How it works: the level borrows.** `js/rules.js` owns both halves —
+`LEVEL_RULES` (which numbers, and each one's friendly slider range) and the
+borrowing itself. `applyLevelRules(rules)` remembers what each number was, writes
+the level's number into `CONFIG`, and `clearLevelRules()` hands every one of them
+back. `main.js` calls the first in `startLevel()` and the second in `leaveGame()`.
+Nothing else in the game knows any of this is happening — `physics.js` and
+`render.js` read `CONFIG` exactly as they always did, which is why **the golden
+traces are untouched by this feature**.
+
+Two things about that are load-bearing:
+
+- `applyLevelRules` **gives back first, then borrows**. "Play All" goes straight
+  from one level into the next without passing through `leaveGame()`, and without
+  the restore-first the second level would pile its numbers on top of the first
+  one's and the originals would be lost.
+- The ⚙ Settings panel and `LEVEL_RULES` **share no keys at all**. Settings is
+  sound and comfort (volume, music, beat pulse, trail, screen shake); rules are
+  movement and feel. That is what makes them safe to use at the same time, and
+  it's why "Reset" in the panel puts back only the panel's own keys instead of
+  the whole of `CONFIG` — a whole-CONFIG reset mid-play would wipe the rules of
+  the level you're standing in.
+
+**Movement and feel only.** No `TILE`, `PLAYER_SIZE` or `LEVEL_ROWS` (those would
+move the level's own tiles about), and no colors — the 🎨 theme owns those.
+
+In the editor it's the **⚙ Rules** button, which shows a count when a level bends
+anything ("⚙ Rules 3"). Its pop-up builds itself from `LEVEL_RULES`, one slider a
+row: a slider you have never touched says **normal** and is not saved, and a ↺
+puts one back to normal. **▶ Try it** shuts the pop-up and test-plays, so a kid
+can feel the change straight away. The rules ride along in "Copy code" / Import
+on one line, next to `reward:`, and code copied before this existed still imports.
+
+**The server checks it again** (`cleanLevelRules` in `lib/validate.js`), by the
+same rule as signs and looks: a number that isn't in the list is **dropped**, one
+that is out of range is **clamped**, and nothing is ever refused — an odd rule
+should never stop a kid saving their level. `LEVEL_RULE_LIMITS` there is
+deliberately *wider* than the editor's slider ranges: the sliders are the
+friendly range a kid drags in, the limits are only "don't be silly", so the two
+lists never have to be kept in exact step. **Adding a tunable a level should be
+able to bend means adding it to BOTH** `LEVEL_RULES` (client) and
+`LEVEL_RULE_LIMITS` (server) — the server drops anything it doesn't know.
+
 ## The file map
 
 **Client** (`public/` — plain ES modules, no build step):
@@ -327,6 +387,7 @@ padded, row indices, `"col,row"` coin keys and stored level strings are unaffect
 | ---- | ------------ |
 | `index.html` | Markup + styles only. One `<script type="module" src="js/main.js">`. No inline JS. |
 | `js/config.js` | `CONFIG` (every tunable number), `DEFAULTS`, `THEMES`, and the cube-skin option lists. The kids' control panel. |
+| `js/rules.js` | Which of those numbers a **level** may bend, and the borrowing that makes it happen: `LEVEL_RULES`, `applyLevelRules`, `clearLevelRules`, `countRules`. |
 | `js/main.js` | The app shell: game state, starting/resetting a level, checkpoints, the game loop, the menu + player picker, and startup. Wires every other module together. |
 | `js/api.js` | Every `fetch`: `apiGet`, `apiWrite` (family PIN + one retry), `apiPost` (scores, no PIN). Owns the PIN and the PIN / "are you sure?" pop-ups. |
 | `js/input.js` | Taps and keys → actions: jump, hold-to-keep-jumping, reporting held-ness (`setHolding`, for flight), Escape, Z/X checkpoints, in-game buttons. |
@@ -336,10 +397,10 @@ padded, row indices, `"col,row"` coin keys and stored level strings are unaffect
 | `js/game/render.js` | Drawing a frame: sky, ground, every tile, HUD, and the win/death overlays. |
 | `js/game/player.js` | How a cube *looks*: `drawPlayer`, `normalizeSkin`, `hslToHex`. Shared by the game, the previews and the picker buttons. |
 | `js/game/effects.js` | The trail and the death explosion (`drawTrail`, `spawnExplosion`, `renderParticles`). |
-| `js/ui/editor.js` | The level editor: paint grid, palette, tune/theme/🎭-look buttons, zoom, signs, test-play, copy/paste, save. |
+| `js/ui/editor.js` | The level editor: paint grid, palette, tune/theme/🎭-look/⚙-rules buttons, zoom, signs, test-play, copy/paste, save. |
 | `js/ui/scrollbars.js` | Scroll bars you can drag with a finger (the editor's grid). Knows nothing about levels. |
 | `js/ui/skins.js` | The cube editor, its live-preview cube, the **My Looks** row — and, in `forLevel` mode, designing the look a level is played as. |
-| `js/ui/settings.js` | The Control Panel: sliders, colors, switches, "Save/Reset for everyone". |
+| `js/ui/settings.js` | The ⚙ Settings panel — **sound and comfort only** (volume, music, beat pulse, trail, screen shake), just for this tablet, saved nowhere. |
 | `js/ui/toast.js` | The little "Saved!" pop-up. |
 | `js/ui/zoomguard.js` | Keeps the *browser's own* zoom from running away: blocks pinching, and shows a "Reset zoom" button (placed where you can still see it) if the page gets zoomed anyway. |
 
@@ -355,7 +416,6 @@ padded, row indices, `"col,row"` coin keys and stored level strings are unaffect
 | `routes/scores.js` | `/api/scores` — best % per player per level. |
 | `routes/leaderboard.js` | `/api/leaderboard` — everyone ranked by coins earned ever. |
 | `routes/prices.js` | `/api/prices` — the shop price list, so the Save button can show a price. |
-| `routes/settings.js` | `/api/settings` — the shared "for everyone" numbers (admin only). |
 | `lib/storage.js` | The JSON files: the file table, read, `updateJson`, write-with-backup, backup rotation, first-run seeding. The only place that touches disk. |
 | `lib/validate.js` | Everything a tablet sends is checked here. **The allowed tile list lives here, once**, and so does `coinKeysFor` (where a level's coins are). |
 | `lib/auth.js` | **The one place that decides who may do what:** roles, `can()`, the login guards, and `publicAccount`/`meView` (the only way an account is sent to a tablet). |
@@ -370,13 +430,13 @@ padded, row indices, `"col,row"` coin keys and stored level strings are unaffect
 **Other:**
 
 - `data/` — runtime state, created/seeded on first run and **gitignored**:
-  - `levels.json` — `{id, name, author, level, song, theme, messages, reward, ownerId, updatedAt}`.
+  - `levels.json` — `{id, name, author, level, song, theme, messages, reward, rules, ownerId, updatedAt}`.
     Array order is the play order (changed via the reorder endpoint). `ownerId` is
     who may edit it; `null` means admin-only (the built-in levels). `messages` is
     the level's signs (`{"col,row": "words"}`) and is missing on older levels.
     `reward` is the look this level is played as and gives you for finishing it
-    (`{name, skin}`, or null) — see "My Looks" under Skins.
-  - `settings.json` — CONFIG overrides saved "for everyone" (a flat subset).
+    (`{name, skin}`, or null) — see "My Looks" under Skins. `rules` is the numbers
+    this level bends (`{"GRAVITY": 1500}`, or `{}`) — see "A level's own rules".
   - `scores.json` — `{levelId, accountId, player, percent, updatedAt}`: each
     player's **best % completion** per level (100 = finished). One row per
     (level, player); the server keeps the max. `accountId` may be `null` on rows
@@ -430,7 +490,7 @@ The client works out its API base from the page URL (`js/api.js`), so it runs th
 same at the site root, in a subfolder, or on a custom port.
 
 Each level carries a `theme` (an index into `THEMES` in `js/config.js`) that sets its
-background sky + ground colors. Theme `0` ("Default") means "use the Control Panel
+background sky + ground colors. Theme `0` ("Default") means "use the `CONFIG`
 colors", so old levels look unchanged. The menu has a **Play All** button that runs
 every level in order (adventure mode).
 
@@ -475,7 +535,7 @@ for it.
 | ---- | --- |
 | `player` | make levels; edit/delete **their own**; edit their own name + cube; report runs |
 | `editor` | everything a player may, plus edit/delete **anybody's** level |
-| `admin` | everything an editor may, plus world settings, reordering levels, and editing any account |
+| `admin` | everything an editor may, plus reordering levels and editing any account |
 
 `extraPerms` is a list of extra powers for one person, so you can give a kid
 `"level.reorder"` without making them a full admin. **`lib/auth.js` is the only
@@ -551,8 +611,8 @@ A skin is a JSON object (defaults reproduce the classic green cube exactly):
 picker buttons all share it); `normalizeSkin(raw)` fills every missing/invalid part
 from `DEFAULT_SKIN` and never throws, so **a missing or malformed skin anywhere
 falls back to the default without errors**. The default cube reads its colors live
-from `CONFIG.PLAYER_COLOR`/`PLAYER_EYE_COLOR`, so "Save for everyone" color tweaks
-still recolor no-profile players (like theme 0). Trails and the death explosion are
+from `CONFIG.PLAYER_COLOR`/`PLAYER_EYE_COLOR`, so a colour changed in `config.js`
+still recolors no-profile players (like theme 0). Trails and the death explosion are
 parameterized by the active skin's style; `CONFIG.TRAIL` and
 `CONFIG.PARTICLES_ON_DEATH` still govern the master on/off and piece count. The
 skin editor is a third full screen (`#skinScreen`), reached from the picker.
@@ -636,8 +696,6 @@ with a friendly 403 when `READ_ONLY=true`.
 | POST   | `/api/runs`         | logged in          | `{levelId, collectedCoinKeys, completed}` → `{credited, unlocked, balance}` |
 | GET    | `/api/leaderboard`  | anyone             | everyone ranked by coins earned ever   |
 | GET    | `/api/prices`       | anyone             | the shop price list                    |
-| GET    | `/api/settings`     | anyone             | current CONFIG overrides              |
-| PUT    | `/api/settings`     | `settings.edit`    | replace CONFIG overrides (admin)      |
 
 **Logging in still works when `READ_ONLY=true`** — you can come in and play, you
 just can't change anything. (It does write `sessions.json`; that's the one write
@@ -678,13 +736,12 @@ Server-side profile validation (`validateProfile`/`cleanSkin`, clear messages):
 Env vars: `PORT` (default 3000), `FAMILY_PIN` (default `1234` for local dev, with a
 warning — always set a real one in production), `READ_ONLY` (`true` freezes writes).
 
-`KNOWN_SETTING_KEYS` in `lib/validate.js` is what "Save for everyone" accepts.
-The long-standing gap here is now closed: it covers the newer tunables
-(`SMALL_PAD_POWER`, `CATAPULT_POWER`, `RAMP_LAUNCH`, `RAMP_GLUE`,
-`BRIDGE_FADE_TIME`, `FAST_MULT`, `SLOW_MULT`, `SAW_RADIUS`, the newer colors) as
-well as the flight ones (`FLY_THRUST`, `FLY_MAX_SPEED`, `FLY_TILT`) and
-`LEVEL_ROWS`. **Whenever you add a tunable to `CONFIG`, add it here too**, or it
-can be changed in the Control Panel for one visit but never shared.
+`LEVEL_RULE_LIMITS` in `lib/validate.js` is the server's list of numbers a level
+may bend, and `LEVEL_RULES` in `public/js/rules.js` is the tablet's. **Whenever
+you add a tunable to `CONFIG` that a level should be able to change, add it to
+both** — the server silently drops anything it doesn't know, so a slider added on
+only one side would appear to work and then vanish on save. Everything else in
+`CONFIG` is set in `config.js` and nowhere else.
 
 ## Testing
 
@@ -726,9 +783,12 @@ Two automatic checks, both run by `npm test`:
   time (or for a name that came across from the old players file) it asks them to
   **pick** a password instead. A login lasts 90 days and survives a server restart.
 - Kids build levels in the in-game editor and tap **Save to server** (it asks for a
-  name + author once). Shared tuning is saved from the Control Panel's **Save for
-  everyone** — an admin-only button, so it's hidden for the kids. Everything
-  persists server-side and is backed up automatically — no git round-trip needed.
+  name + author once). Tuning is per level now — the editor's **⚙ Rules** button —
+  and rides along with the level when it's saved. Everything persists server-side
+  and is backed up automatically — no git round-trip needed.
+- **Changing the game's numbers for real** (the ones a level can't bend, or the
+  starting point every level plays from) is a grown-up job done by editing
+  `public/js/config.js` and reloading. There is no button for it on purpose.
 - **Grown-up jobs, done by hand in `data/`. None of them need a restart** — the
   server re-reads these files as it goes (the person should reload the page to see
   their new buttons, but the server enforces the change immediately):
@@ -791,9 +851,20 @@ Two automatic checks, both run by `npm test`:
   pop the magnifier; sliding a finger off the screen stops the rocket.
 - A short old level still looks right with the taller sky (more room above, world
   slightly zoomed), and its gravity-flip sections still work at the new roof.
-- Save to server, Edit, and Save for everyone work by touch; a wrong PIN re-prompts.
+- Save to server and Edit work by touch; a wrong PIN re-prompts.
 - Picking a level theme (🎨 in the editor) changes its background; it survives a save
-  and reopen; a "Default"-theme level still follows the Control Panel colors.
+  and reopen; a "Default"-theme level still follows the `CONFIG` colors.
+- **A level's own rules (⚙ Rules):** drag Gravity down → ▶ Try it → the cube
+  floats; ↺ → normal again. Save, go back to the menu and play it: still floaty,
+  and the button says "⚙ Rules 1" when you reopen it. Play a *different* level
+  straight afterwards and it is normal — likewise "Play All" running from a rules
+  level into a plain one, and dying and respawning inside a rules level.
+  "Copy code" carries the rules and Import brings them back; code copied before
+  rules existed still imports. A level with no rules plays exactly as before.
+- ⚙ Settings holds **only** sound and comfort (volume, music, beat pulse, trail,
+  screen shake) — no gravity/jump sliders and no ★ "for everyone" buttons, even
+  for an admin. Opening it mid-play on a rules level and tapping **Reset** leaves
+  that level's gravity alone. `curl -X PUT .../api/settings` answers 404.
 - Reorder (▲/▼), delete (🗑 with the "are you sure?" pop-up), and **Play All**
   (adventure mode) all work by touch; reorder/delete persist after a reload.
 - `READ_ONLY=true` refuses writes with the friendly message; **logging in and
@@ -840,11 +911,11 @@ Two automatic checks, both run by `npm test`:
   list; spend down until something is unaffordable → "Need N more" and the button
   is disabled; change your mind back → free again. Buy something and check the
   purse. Reopen the editor → free (no changes).
-- As a `player`: no ▲/▼ on any level, ✎/🗑 only on your own, no "Save for
-  everyone". Then `curl -X DELETE` somebody else's level **with that player's
-  cookie** → a friendly 403. (Hiding buttons is not the security; this is.)
+- As a `player`: no ▲/▼ on any level, ✎/🗑 only on your own. Then
+  `curl -X DELETE` somebody else's level **with that player's cookie** → a
+  friendly 403. (Hiding buttons is not the security; this is.)
 - Hand-edit an account to `"editor"` → ✎/🗑 on every level. Add
-  `"extraPerms": ["level.reorder"]` to a `player` → ▲/▼ appear, settings stay locked.
+  `"extraPerms": ["level.reorder"]` to a `player` → ▲/▼ appear.
 - Edit `data/prices.json` while the server runs → the cube editor shows the new
   price without a restart.
 - The trophy board ranks by coins **earned**, and buying a cube does not move you

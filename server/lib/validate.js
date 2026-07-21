@@ -1,8 +1,8 @@
 // ============================================================
 // validate.js — the bouncer for everything a tablet sends up.
 // ============================================================
-// Every level, settings change, high score, and cube skin that
-// comes from a tablet is checked here before we save it. If it
+// Every level, high score, and cube skin that comes from a
+// tablet is checked here before we save it. If it
 // looks wrong we throw an Error with a kid-friendly message the
 // server can show. The list of allowed level tiles lives here,
 // once, so it can never drift out of sync with itself.
@@ -45,23 +45,34 @@ const DEFAULT_SKIN = {
 };
 const MAX_NAME = 20;                 // a player name is 1–20 letters
 
-// The full list of CONFIG names the settings file is allowed to override.
-// (This must stay in sync with the CONFIG block in public/index.html.)
-const KNOWN_SETTING_KEYS = new Set([
-  "SCROLL_SPEED", "GRAVITY", "JUMP_POWER", "PAD_POWER", "SPIN_SPEED", "CAMERA_X",
-  "SMALL_PAD_POWER", "CATAPULT_POWER",
-  "RAMP_LAUNCH", "RAMP_GLUE", "BRIDGE_FADE_TIME",
-  "FAST_MULT", "SLOW_MULT",
-  "FLY_THRUST", "FLY_MAX_SPEED", "FLY_TILT",
-  "LEVEL_ROWS", "TILE", "PLAYER_SIZE", "SPIKE_MERCY", "SAW_RADIUS",
-  "PLAYER_COLOR", "PLAYER_EYE_COLOR", "BLOCK_COLOR", "BLOCK_EDGE",
-  "SPIKE_COLOR", "PAD_COLOR", "SMALL_PAD_COLOR", "CATAPULT_COLOR",
-  "COIN_COLOR", "COIN_SILVER_COLOR", "GROUND_COLOR",
-  "SIGN_COLOR", "SIGN_TEXT_COLOR", "SIGN_TEXT_SIZE",
-  "SKY_TOP", "SKY_BOTTOM",
-  "PARTICLES_ON_DEATH", "TRAIL", "SCREEN_SHAKE",
-  "SOUND", "MUSIC", "MUSIC_VOLUME", "MUSIC_BPM", "BEAT_PULSE",
-]);
+/* ----------------------------------------------------------------
+   A LEVEL'S OWN RULES. A level may borrow a few of the game's numbers
+   while you play it — stronger gravity, a bigger jump, a fiercer
+   rocket. This is the list of which numbers, and how far each one may
+   go. Nothing else can be changed: sizes and colors are not in here,
+   because those would move the level's own tiles about.
+
+   These limits are DELIBERATELY wider than the sliders in the editor
+   (public/js/rules.js). The sliders are the friendly range a kid drags
+   in; this is only "don't be silly", so the two lists never have to be
+   kept in exact step. The tablet is never the one that decides.
+   ---------------------------------------------------------------- */
+const LEVEL_RULE_LIMITS = {
+  GRAVITY:         [100, 40000],
+  JUMP_POWER:      [100, 8000],
+  SCROLL_SPEED:    [20, 2000],
+  PAD_POWER:       [100, 8000],
+  SMALL_PAD_POWER: [100, 8000],
+  CATAPULT_POWER:  [100, 12000],
+  FLY_THRUST:      [0, 40000],
+  FLY_MAX_SPEED:   [20, 4000],
+  SPIN_SPEED:      [0, 3000],
+  SPIKE_MERCY:     [0, 0.5],
+  RAMP_LAUNCH:     [0, 5],
+  FAST_MULT:       [0.05, 10],
+  SLOW_MULT:       [0.05, 10],
+  CAMERA_X:        [0.05, 0.9],
+};
 
 // Trim blank lines off the top and bottom (the level format often has a
 // leading newline) and drop trailing spaces so rows line up.
@@ -125,6 +136,29 @@ function cleanMessages(raw, cols, rows) {
     if (!words) continue;
     out[key] = words;
     kept++;
+  }
+  return out;
+}
+
+/* ----------------------------------------------------------------
+   THE NUMBERS A LEVEL CHANGES: { "GRAVITY": 1500 } — only the ones it
+   actually changes, so a level with no rules of its own plays exactly
+   like the game always did.
+
+   Anything strange (a number we don't let levels change, words instead
+   of a number) is quietly DROPPED, and a number that is out of range is
+   pulled back to the nearest end — the same rule as the signs above: an
+   odd rule should never stop a kid saving their level.
+   ---------------------------------------------------------------- */
+function cleanLevelRules(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [key, value] of Object.entries(raw)) {
+    const limits = LEVEL_RULE_LIMITS[key];
+    if (!limits) continue;                          // not a number a level may change
+    const n = Number(value);
+    if (!Number.isFinite(n)) continue;
+    out[key] = Math.max(limits[0], Math.min(limits[1], n));
   }
   return out;
 }
@@ -204,29 +238,15 @@ function validateLevel(body, limits = {}) {
     song,
     theme,
     messages: cleanMessages(body.messages, width, rows.length),
+    // The numbers this level changes while you play it (gravity, jump…).
+    // Always answered — {} when there are none — so saving a level that
+    // USED to bend the rules really does put them back to normal.
+    rules: cleanLevelRules(body.rules),
     // The look this level makes you wear (and gives you for finishing it).
     // Always answered — null when there isn't one — so saving a level that
     // USED to have a look really does take it away again.
     reward: cleanReward(body.reward),
   };
-}
-
-// Settings overrides must be a flat object of known CONFIG names with
-// simple values (number / string / true / false).
-function validateSettings(body) {
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw new Error("Settings must be an object.");
-  }
-  const clean = {};
-  for (const [key, value] of Object.entries(body)) {
-    if (!KNOWN_SETTING_KEYS.has(key)) throw new Error("Unknown setting: " + key);
-    const t = typeof value;
-    if (t !== "number" && t !== "string" && t !== "boolean") {
-      throw new Error("Setting " + key + " has a strange value.");
-    }
-    clean[key] = value;
-  }
-  return clean;
 }
 
 // A high score is one player's best on one level: which level, who, and how
@@ -332,7 +352,8 @@ function validateAccountEdit(body) {
 }
 
 module.exports = {
-  LEVEL_CHARS, MAX_COLS, MAX_ROWS, DEFAULT_SKIN, MAX_NAME, KNOWN_SETTING_KEYS,
-  normalizeLevel, validateLevel, validateSettings, validateScore,
-  countEmoji, cleanSkin, cleanMessages, cleanReward, coinKeysFor, validateName, validateAccountEdit,
+  LEVEL_CHARS, MAX_COLS, MAX_ROWS, DEFAULT_SKIN, MAX_NAME, LEVEL_RULE_LIMITS,
+  normalizeLevel, validateLevel, validateScore,
+  countEmoji, cleanSkin, cleanMessages, cleanReward, cleanLevelRules,
+  coinKeysFor, validateName, validateAccountEdit,
 };

@@ -126,7 +126,7 @@ if (accounts) {
     const admins = accounts.filter(a => a.role === "admin");
     if (admins.length) ok("grown-up(s) in charge: " + admins.map(a => a.name).join(", "));
     else {
-      bad("NOBODY is an admin — no one can change shared settings or level order.");
+      bad("NOBODY is an admin — no one can change the level order or fix an account.");
       note("Fix: edit " + path.join(DATA, "accounts.json") +
         " and set one person's \"role\" to \"admin\". No restart needed.");
     }

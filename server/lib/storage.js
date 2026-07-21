@@ -2,8 +2,8 @@
 // storage.js — the little filing cabinet (no database!).
 // ============================================================
 // All of Hyper Hop's memory is a handful of JSON files in ./data:
-// the levels, the shared settings, the high scores, the players and
-// their coins. This module is the ONLY place that reads and writes
+// the levels, the high scores, the players and their coins. This
+// module is the ONLY place that reads and writes
 // them. Before every change it quietly copies the old file into
 // data/backups/ and keeps the newest 200, so a bad save can always be
 // undone by hand.
@@ -43,7 +43,6 @@ const DEFAULT_PRICES = {
    ---------------------------------------------------------------- */
 const FILES = {
   levels:   { name: "levels.json",   start: seedLevels,             note: "starter levels" },
-  settings: { name: "settings.json", start: () => ({}),             note: "no shared settings yet" },
   scores:   { name: "scores.json",   start: () => [],               note: "no high scores yet" },
   accounts: { name: "accounts.json", start: () => [],               note: "no players yet" },
   sessions: { name: "sessions.json", start: () => [],               note: "nobody logged in yet" },
@@ -53,7 +52,6 @@ const FILES = {
 for (const key of Object.keys(FILES)) FILES[key].file = path.join(DATA_DIR, FILES[key].name);
 
 const LEVELS_FILE = FILES.levels.file;
-const SETTINGS_FILE = FILES.settings.file;
 const SCORES_FILE = FILES.scores.file;
 const ACCOUNTS_FILE = FILES.accounts.file;
 const SESSIONS_FILE = FILES.sessions.file;
@@ -269,7 +267,7 @@ function indexById(rows, id) {
 }
 
 module.exports = {
-  DATA_DIR, BACKUP_DIR, LEVELS_FILE, SETTINGS_FILE, SCORES_FILE, PROFILES_FILE,
+  DATA_DIR, BACKUP_DIR, LEVELS_FILE, SCORES_FILE, PROFILES_FILE,
   ACCOUNTS_FILE, SESSIONS_FILE, PRICES_FILE, META_FILE, DEFAULT_PRICES,
   ensureData, readJson, safeTimestamp, backupFile, writeJsonWithBackup,
   updateJson, SKIP_SAVE, nextLevelId, nextId, indexById,

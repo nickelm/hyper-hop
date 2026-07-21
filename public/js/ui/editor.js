@@ -14,6 +14,7 @@ import { parseLevel } from "../game/level.js";
 import { Music, SONGS } from "../music.js";
 import { apiWrite, askConfirm } from "../api.js";
 import { maxCoinsPerLevel } from "../economy.js";
+import { LEVEL_RULES, countRules } from "../rules.js";
 import { showToast } from "./toast.js";
 import { initScrollbars } from "./scrollbars.js";
 
@@ -46,6 +47,7 @@ const ED = {
   editingId: null,                // the server level we're changing (null = a brand-new one)
   author: "",                     // who made this level (asked for on the first save)
   reward: null,                   // the look this level is played as: {name, skin} (null = none)
+  rules: {},                      // the numbers this level changes: { GRAVITY: 1500 } ({} = plays normally)
 };
 function edInit() {
   ED.rows = CONFIG.LEVEL_ROWS;
@@ -566,12 +568,75 @@ lookBtn.onclick = () => {
 };
 updateLookBtn();
 
+/* ----------------------------------------------------------------
+   THE LEVEL'S RULES. A level can bend a few of the game's numbers
+   while you are inside it: moon gravity, a giant jump, a fiercer
+   rocket. Which numbers, and how far each may go, is the LEVEL_RULES
+   list in js/rules.js — this pop-up builds itself from that list, so
+   adding a number there makes a new slider appear here by itself.
+
+   A slider you have never touched says "normal" and is NOT saved.
+   Only the numbers you actually moved ride along with the level, so a
+   level that plays normally carries nothing at all.
+   ---------------------------------------------------------------- */
+const rulesBtn = document.getElementById("rulesBtn");
+const rulesBox = document.getElementById("rulesBox");
+const rulesListEl = document.getElementById("rulesList");
+
+function updateRulesBtn() {
+  const n = countRules(ED.rules);
+  rulesBtn.textContent = "⚙ Rules" + (n ? " " + n : "");
+}
+
+// Draw one row per number: its name, what it's set to (or "normal"), a
+// slider, and a ↺ to put it back to normal.
+function buildRulesBox() {
+  rulesListEl.innerHTML = "";
+  for (const [key, label, min, max, step] of LEVEL_RULES) {
+    const wrap = document.createElement("div");
+    wrap.className = "ctrl";
+    wrap.innerHTML =
+      '<div class="row"><span>' + label + '</span>' +
+      '<span class="val"></span>' +
+      '<button class="btn small ruleReset" title="Back to normal">↺</button></div>' +
+      '<input type="range" min="' + min + '" max="' + max + '" step="' + step + '">';
+    const slider = wrap.querySelector("input");
+    const valEl = wrap.querySelector(".val");
+    const resetBtn = wrap.querySelector(".ruleReset");
+
+    // "Normal" is whatever the game plays at when no level bends it.
+    // The editor is never inside a level, so that's simply CONFIG.
+    const normal = CONFIG[key];
+    const show = () => {
+      const changed = ED.rules[key] !== undefined;
+      slider.value = changed ? ED.rules[key] : normal;
+      valEl.textContent = changed ? ED.rules[key] : "normal";
+      valEl.classList.toggle("normal", !changed);
+      resetBtn.classList.toggle("hidden", !changed);
+    };
+    slider.addEventListener("input", () => {
+      ED.rules[key] = Number(slider.value);
+      show(); updateRulesBtn();
+    });
+    resetBtn.onclick = () => { delete ED.rules[key]; show(); updateRulesBtn(); };
+    show();
+    rulesListEl.appendChild(wrap);
+  }
+}
+rulesBtn.onclick = () => { buildRulesBox(); rulesBox.classList.remove("hidden"); };
+document.getElementById("rulesDoneBtn").onclick = () => rulesBox.classList.add("hidden");
+updateRulesBtn();
+
 function edToText() {
   return ED.grid.map(row => row.join("")).join("\n");
 }
-document.getElementById("playTestBtn").onclick = () => {
-  startLevel(parseLevel(edToText(), ED.messages), true, false, ED.song, ED.theme, null, ED.reward);
-};
+function testPlay() {
+  startLevel(parseLevel(edToText(), ED.messages), true, false, ED.song, ED.theme, null,
+             { reward: ED.reward, rules: ED.rules });
+}
+document.getElementById("playTestBtn").onclick = testPlay;
+// "Try it" in the rules pop-up: shut the pop-up and go and FEEL the change.
+document.getElementById("rulesTryBtn").onclick = () => { rulesBox.classList.add("hidden"); testPlay(); };
 // Make the level's name safe to drop inside "..." in the exported code,
 // so a name with a quote in it can't break things.
 function escapeName(name) {
@@ -589,9 +654,13 @@ document.getElementById("copyBtn").onclick = () => {
   // ...and so does the level's look, on one line of its own. A level
   // without one doesn't get the line, so old code still looks the same.
   const look = ED.reward ? "  reward: " + JSON.stringify(ED.reward) + ",\n" : "";
+  // ...and the numbers this level changes, likewise on one line, and likewise
+  // missing altogether from a level that plays by the normal rules.
+  const rules = Object.keys(ED.rules).length
+    ? "  rules: " + JSON.stringify(ED.rules) + ",\n" : "";
   document.getElementById("exportText").value =
     "{\n  name: \"" + escapeName(levelName()) + "\",\n  song: " + ED.song +
-    ",\n  theme: " + ED.theme + ",\n" + signs + look +
+    ",\n  theme: " + ED.theme + ",\n" + signs + look + rules +
     "  level: `\n" + edToText() + "\n`,\n},";
   document.getElementById("exportBox").classList.remove("hidden");
 };
@@ -625,6 +694,10 @@ function importLevel(text) {
   const lookMatch = text.match(/reward:\s*(\{.*\})\s*,/);
   let look = null;
   if (lookMatch) { try { look = JSON.parse(lookMatch[1]); } catch (e) { look = null; } }
+  // And the numbers it changes. Same one-line trick as the look above.
+  const rulesMatch = text.match(/rules:\s*(\{.*\})\s*,/);
+  let rules = {};
+  if (rulesMatch) { try { rules = JSON.parse(rulesMatch[1]); } catch (e) { rules = {}; } }
   // If there is a `...` grid block, use only what's inside the backticks.
   const first = text.indexOf("`"), last = text.lastIndexOf("`");
   const gridText = (first !== -1 && last > first) ? text.slice(first + 1, last) : text;
@@ -641,6 +714,8 @@ function importLevel(text) {
   if (themeMatch) { ED.theme = Number(themeMatch[1]) % THEMES.length; updateThemeBtn(); }
   ED.reward = (look && look.name && look.skin) ? look : null;
   updateLookBtn();
+  ED.rules = (rules && typeof rules === "object" && !Array.isArray(rules)) ? rules : {};
+  updateRulesBtn();
   document.getElementById("importBox").classList.add("hidden");
   drawEditor();
 }
@@ -687,7 +762,7 @@ async function saveToServer() {
   if (!(await trimCoinsIfNeeded())) return;
   const body = { name: levelName(), author: ED.author, level: edToText(),
                  song: ED.song, theme: ED.theme, messages: ED.messages,
-                 reward: ED.reward };
+                 reward: ED.reward, rules: ED.rules };
   try {
     let created = null;
     if (ED.editingId != null) {
@@ -731,20 +806,22 @@ document.getElementById("saveConfirmBtn").onclick = () => {
 };
 document.getElementById("saveCancelBtn").onclick = () => document.getElementById("saveBox").classList.add("hidden");
 
-// Open a level from the menu for editing: load its grid, name, tune, theme
-// and look into the editor and show it.
+// Open a level from the menu for editing: load its grid, name, tune, theme,
+// look and rules into the editor and show it.
 export function openLevelForEdit(L) {
   const parsed = parseLevel(L.level);
   edLoadGrid(parsed, L.messages);
   ED.editingId = L.id;                              // remember WHICH level we're changing
   ED.author = L.author || "";
   ED.reward = L.reward || null;                     // the cube this level is played as
+  ED.rules = { ...(L.rules || {}) };                // and the numbers it changes (a copy, so we edit ours)
   ED.song = (L.song != null) ? (Number(L.song) % SONGS.length) : 0;
   ED.theme = (L.theme != null) ? (Number(L.theme) % THEMES.length) : 0;
   document.getElementById("levelNameInput").value = L.name;
   updateTuneBtn();
   updateThemeBtn();
   updateLookBtn();
+  updateRulesBtn();
   S.screen = "editor"; showScreen("editorScreen"); layoutEditor();
 }
 
@@ -753,7 +830,9 @@ export function openLevelForEdit(L) {
 export function openNewLevel() {
   ED.editingId = null; ED.author = getPlayerName() || "";
   ED.reward = null;                    // a new level has no look of its own yet
+  ED.rules = {};                       // ...and plays by the normal rules
   updateLookBtn();
+  updateRulesBtn();
   S.screen = "editor"; showScreen("editorScreen"); layoutEditor();
 }
 

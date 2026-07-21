@@ -99,7 +99,7 @@ job applies to the very next thing that person does. (They should reload the pag
 to see the new buttons appear, but the server is already enforcing it.)
 
 `"role"` is `"player"`, `"editor"` (may fix anybody's level) or `"admin"` (may also
-change the shared settings and the level order). To hand out one power without a
+change the level order and edit any account). To hand out one power without a
 whole promotion, add it to that account's `"extraPerms"`, e.g.
 `"extraPerms": ["level.reorder"]`.
 
@@ -165,11 +165,11 @@ sudo -u hyperhop npm install --omit=dev
 systemctl restart hyper-hop
 ```
 
-Your levels and settings live in `data/` and are **not** touched by an update.
+Your levels, accounts and scores live in `data/` and are **not** touched by an update.
 
 ## The freeze switch (READ_ONLY)
 
-To temporarily stop anyone from changing levels or settings (e.g. during a demo):
+To temporarily stop anyone from changing levels or cubes (e.g. during a demo):
 
 ```bash
 sed -i 's/READ_ONLY=false/READ_ONLY=true/' /etc/hyper-hop.env
@@ -179,7 +179,7 @@ systemctl restart hyper-hop
 The game still plays normally; every attempt to save gets a friendly "editing is
 frozen" message. Flip it back to `false` and restart to allow saving again.
 
-## Restoring a level or settings file from a backup
+## Restoring a level or account file from a backup
 
 Every time anything is saved, the server first copies the old file into
 `data/backups/` with a timestamp, and keeps the newest 200 copies. To roll back:
@@ -198,7 +198,7 @@ sudo -u hyperhop cp \
 systemctl start hyper-hop
 ```
 
-The same works for `settings.json` (swap the filename in both spots).
+The same works for `accounts.json` or `scores.json` (swap the filename in both spots).
 
 ## Handy commands
 

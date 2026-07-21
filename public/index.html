@@ -238,12 +238,16 @@
   .practiceRow { display: flex; align-items: center; gap: 10px; color: #fff;
     font-size: clamp(16px, 3.5vw, 22px); font-weight: bold; cursor: pointer; }
   .practiceRow input { width: 28px; height: 28px; accent-color: #7dff5e; }
-  /* ---------- Control panel ---------- */
-  #controlPanel { position: absolute; inset: 6%; background: #10102a; border: 4px solid #3ec6ff;
+  /* ---------- Control panel (and the editor's ⚙ Rules pop-up, which
+       is built the same way out of the same .ctrl rows) ---------- */
+  #controlPanel, #rulesBox { position: absolute; inset: 6%; background: #10102a; border: 4px solid #3ec6ff;
     border-radius: 16px; padding: 16px; z-index: 25; display: flex; flex-direction: column; gap: 10px; }
-  #controlPanel h2 { color: #fff; text-align: center; font-size: 24px; }
-  #panelControls { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 14px;
+  #controlPanel h2, #rulesBox h2 { color: #fff; text-align: center; font-size: 24px; }
+  #panelControls, #rulesList { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 14px;
     padding: 4px; -webkit-overflow-scrolling: touch; }
+  /* A rule this level does NOT change just says "normal", quietly. */
+  .ctrl .val.normal { color: rgba(255,255,255,.45); font-weight: normal; }
+  .ctrl .row .ruleReset { margin-left: 10px; padding: 2px 10px; font-size: 15px; }
   .ctrl { display: flex; flex-direction: column; gap: 4px; color: #fff; }
   .ctrl .row { display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
   .ctrl .val { color: #7dff5e; }
@@ -251,8 +255,11 @@
   .ctrl input[type=range] { width: 100%; height: 30px; accent-color: #3ec6ff; }
   .ctrl.toggle .row { cursor: pointer; }
   .ctrl input[type=checkbox] { width: 28px; height: 28px; accent-color: #7dff5e; }
-  #panelBottom { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
-  #panelHint { color: rgba(255,255,255,.75); font-size: 13px; text-align: center; padding: 0 4px; }
+  /* The little line of words at the top of a panel, and its row of buttons
+     along the bottom. Classes, not ids: the ⚙ Settings panel and the
+     editor's ⚙ Rules pop-up both wear them. */
+  .panelBottom { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  .panelHint { color: rgba(255,255,255,.75); font-size: 13px; text-align: center; padding: 0 4px; }
   .ctrl input[type=color] { width: 100%; height: 34px; border: 2px solid #555a8a; border-radius: 8px;
     background: #1e1e40; padding: 2px; }
 </style>
@@ -307,14 +314,13 @@
 
 <!-- ======================= CONTROL PANEL ======================= -->
 <div id="controlPanel" class="hidden">
-  <h2>&#9881; Control Panel</h2>
-  <div id="panelHint">Changes are just for you until you tap <b>Save for everyone</b>.
-    &#9733; = one of the settings that gets shared with all players.</div>
+  <h2>&#9881; Settings</h2>
+  <div class="panelHint">These are just for you, on this tablet.
+    How the game <b>plays</b> is up to each level &mdash; that's the
+    <b>&#9881; Rules</b> button in the level editor.</div>
   <div id="panelControls"></div>
-  <div id="panelBottom">
-    <button class="btn green small" id="saveEveryoneBtn">&#9733; Save for everyone</button>
-    <button class="btn small" id="resetCfgBtn">Reset (just me)</button>
-    <button class="btn small" id="resetEveryoneBtn">Reset for everyone</button>
+  <div class="panelBottom">
+    <button class="btn small" id="resetCfgBtn">Reset</button>
     <button class="btn green small" id="closePanelBtn">Close</button>
   </div>
 </div>
@@ -332,6 +338,9 @@
     <!-- The cube this level is played as, and the prize for finishing it.
          Tapping it opens the cube editor (see editLook in main.js). -->
     <button class="btn small" id="lookBtn">&#127917; No look</button>
+    <!-- The numbers THIS level plays by (gravity, jump power, rocket push).
+         The number beside it is how many it changes. -->
+    <button class="btn small" id="rulesBtn">&#9881; Rules</button>
     <button class="btn small" id="widerBtn">Wider +</button>
     <button class="btn small" id="narrowBtn">Shorter &minus;</button>
     <button class="btn small" id="zoomOutBtn" title="Show more">&#128269;&minus;</button>
@@ -405,6 +414,20 @@
   <div style="display:flex;gap:8px;justify-content:center">
     <button class="btn green small" id="saveConfirmBtn">Save</button>
     <button class="btn small" id="saveCancelBtn">Cancel</button>
+  </div>
+</div>
+
+<!-- ⚙ Rules: the numbers THIS level plays by. Every slider says "normal"
+     until you move it, and only the ones you moved are saved with the level.
+     The rows are built by editor.js from LEVEL_RULES in js/rules.js. -->
+<div id="rulesBox" class="hidden">
+  <h2>&#9881; This level's rules</h2>
+  <div class="panelHint">Only the ones you change are saved. Everything else
+    plays the way the game normally does.</div>
+  <div id="rulesList"></div>
+  <div class="panelBottom">
+    <button class="btn green small" id="rulesTryBtn">&#9654; Try it</button>
+    <button class="btn green small" id="rulesDoneBtn">Done</button>
   </div>
 </div>
 

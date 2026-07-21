@@ -19,6 +19,7 @@ import { draw } from "./game/render.js";
 import { Music, SONGS } from "./music.js";
 import { apiGet, apiWrite, apiPost, apiDelete, askConfirm } from "./api.js";
 import { initInput } from "./input.js";
+import { applyLevelRules, clearLevelRules } from "./rules.js";
 import { showToast } from "./ui/toast.js";
 import { initZoomGuard } from "./ui/zoomguard.js";
 import { initSettings, isPanelOpen, openPanel, closePanel } from "./ui/settings.js";
@@ -147,14 +148,20 @@ let holding = false;               // is a finger (or the space bar) held down? 
 // even ones (0, 2, 4...) are the beats — that's when we flash the world.
 Music.onStep = (i) => { if (CONFIG.BEAT_PULSE && i % 2 === 0) beatPulse = 1; };
 
-function startLevel(parsed, isTest, practice, songIndex, themeIndex, levelId, reward) {
+// `extras` is the rest of what a level carries beyond its grid: the cube it
+// makes you wear (`reward`) and the numbers it changes while you're inside it
+// (`rules`). They go in one little bundle rather than as two more arguments on
+// the end, so this line stays readable as levels learn new tricks.
+function startLevel(parsed, isTest, practice, songIndex, themeIndex, levelId, extras) {
+  const { reward = null, rules = null } = extras || {};
   S.level = parsed; S.testMode = !!isTest; S.screen = "game";
   S.paused = false;
   S.practice = !!practice;
   S.songIndex = songIndex || 0;   // which tune from music.js this level plays
   S.themeIndex = themeIndex || 0; // which background theme this level uses
   S.levelId = (levelId != null) ? levelId : null;  // which server level (for high scores); null = a test run, no score
-  S.reward = reward || null;      // the cube THIS level is played as (null = wear your own)
+  S.reward = reward;              // the cube THIS level is played as (null = wear your own)
+  applyLevelRules(rules);         // moon gravity? a giant jump? borrow this level's numbers
   checkpoints = [];             // fresh level = no checkpoints yet
   attempts = 0;
   resetRun();
@@ -367,9 +374,8 @@ function levelProgress() {
 
 // Which skin should the cube wear right now? Whoever is logged in wears
 // their own saved cube. If somehow nobody is (the editor's test-play
-// before the first login), we build the classic cube from the Control
-// Panel colors, so "Save for everyone" color tweaks still work and the
-// default look is exactly the same as it always was.
+// before the first login), we build the classic cube from the CONFIG
+// colors, so the default look is exactly the same as it always was.
 //
 // A level with a look of its own beats all of that: "The Crow Flies" is
 // played as The Crow by everybody, every time — even once you've won it.
@@ -427,6 +433,7 @@ initInput({
 function leaveGame() {
   closePanel();
   Music.stop();                 // silence the music when we leave the level
+  clearLevelRules();            // and give back any numbers the level borrowed
   S.campaign = false;           // leaving always ends "Play All" mode
   document.getElementById("hud").classList.add("hidden");
   document.getElementById("attempts").classList.add("hidden");
@@ -450,7 +457,8 @@ function afterWin() {
 function startLevelByIndex(i) {
   const L = serverLevels[i];
   if (!L) { leaveGame(); return; }
-  startLevel(parseLevel(L.level, L.messages), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id, L.reward);
+  startLevel(parseLevel(L.level, L.messages), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id,
+             { reward: L.reward, rules: L.rules });
 }
 
 // "Play All": start at the first level and roll through them all in order.
@@ -475,7 +483,7 @@ function showScreen(id) {
 /* ================================================================
    ================  TALKING TO THE SERVER  ========================
    ================================================================
-   The game downloads its levels and shared settings from the little
+   The game downloads its levels and everyone's scores from the little
    server (server.js) when it starts. Everything the game asks for
    goes through these helpers. */
 
@@ -485,17 +493,6 @@ let serverLevels = [];
 // Everyone's high scores (each player's best % on each level). Downloaded at
 // start and kept fresh as new scores come in.
 let serverScores = [];
-
-// Copy the server's saved settings ON TOP OF our CONFIG defaults, so a
-// change saved "for everyone" shows up for every player. DEFAULTS was
-// captured earlier, so "Reset to defaults" still brings back the code numbers.
-function applySettings(overrides) {
-  for (const [key, value] of Object.entries(overrides || {})) {
-    if (key in CONFIG) CONFIG[key] = value;
-  }
-  // The music speed lives inside music.js, so hand it the shared value.
-  if (typeof Music !== "undefined") Music.setBpm(CONFIG.MUSIC_BPM);
-}
 
 /* ================================================================
    ==================  HIGH SCORES (best % per level)  ============
@@ -558,7 +555,9 @@ function buildMenu(levels) {
     const title = (i + 1) + ". " + L.name + (L.author ? "  — " + L.author : "");
     play.innerHTML = '<div>' + escapeHtml(title) + '</div>' + lookLine(L) +
       '<div class="levelScore">' + scoreLine(L.id) + '</div>';
-    play.onclick = () => { S.campaign = false; startLevel(parseLevel(L.level, L.messages), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id, L.reward); };
+    play.onclick = () => { S.campaign = false;
+      startLevel(parseLevel(L.level, L.messages), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id,
+                 { reward: L.reward, rules: L.rules }); };
     // ...a little 📊 opens the full leaderboard for this level...
     const board = document.createElement("button");
     board.className = "btn small"; board.textContent = "📊"; board.title = "High scores";
@@ -792,10 +791,10 @@ document.getElementById("openEditorBtn").onclick = openNewLevel;
 /* ================================================================
    ========================  CONTROL PANEL  ========================
    ================================================================
-   The sliders and switches live in js/ui/settings.js. It needs to know
-   whether we're playing (so it can pause) and which song is on, so we
-   hand it S. openPanel/closePanel/isPanelOpen come back from there. */
-initSettings({ S, may });
+   The sound and comfort switches live in js/ui/settings.js. It needs to
+   know whether we're playing (so it can pause) and which song is on, so
+   we hand it S. openPanel/closePanel/isPanelOpen come back from there. */
+initSettings({ S });
 
 /* ================================================================
    ========================  LEVEL EDITOR  =========================
@@ -863,12 +862,10 @@ initEconomy({ onBalanceChanged: () => updateMenuBar() });
 // Everything the menu needs once we know who's playing.
 async function loadWorld() {
   try {
-    const [settings, levels, scores] = await Promise.all([
-      apiGet("/settings"),
+    const [levels, scores] = await Promise.all([
       apiGet("/levels"),
       apiGet("/scores"),
     ]);
-    applySettings(settings);       // shared "Save for everyone" numbers
     serverLevels = levels;
     serverScores = scores;
     buildMenu(levels);

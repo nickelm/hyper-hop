@@ -43,7 +43,8 @@ fs.writeFileSync(path.join(TMP, "package.json"), '{ "type": "module" }');
 // renamed and this list isn't updated, the whole test stops at "the game
 // did not load at all" — which is exactly the point.
 fs.appendFileSync(path.join(TMP, "main.js"),
-  "\nexport { startLevel, parseLevel, draw, jump, stepPhysics, drainSimEvents, simState, gameView, FIXED_DT,\n" +
+  "\nexport { startLevel, leaveGame, parseLevel, draw, jump, stepPhysics, drainSimEvents, simState, gameView, FIXED_DT,\n" +
+  "         CONFIG,\n" +
   "         openSkinEditor, buildMenu, buildLoginPicker, showLogin, updateMenuBar, openLeaderboard,\n" +
   "         showScreen, openNewLevel, openLevelForEdit };\n");
 
@@ -112,7 +113,7 @@ const FAKE_ME = {
   looks: [{ skin: FAKE_SKIN, name: "", from: "shop" },
           { skin: FAKE_CROW, name: "The Crow", from: "level" }],
   powers: ["level.create", "level.editOwn", "level.deleteOwn", "me.edit", "run.report",
-           "level.editAny", "level.deleteAny", "settings.edit", "level.reorder", "account.editAny"],
+           "level.editAny", "level.deleteAny", "level.reorder", "account.editAny"],
 };
 const FAKE_PRICES = { startingCoins: 50, coinValue: 1, levelCreateBounty: 25, maxCoinsPerLevel: 25,
   skin: { bodyColor: 5, outlineColor: 5, faceColor: 5, shape: 20, face: 10, emoji: 15, trail: 25, explosion: 25 } };
@@ -136,9 +137,9 @@ setGlobal("fetch", (url) => {
   if (at("/logout"))      return reply({ ok: true });
   if (at("/levels"))      return reply([{ id: 1, name: "Level One", author: "Test", ownerId: 1,
                                           level: "..*..|", song: 0, theme: 0,
-                                          reward: { name: "The Crow", skin: FAKE_CROW } }]);
+                                          reward: { name: "The Crow", skin: FAKE_CROW },
+                                          rules: { GRAVITY: 9000 } }]);
   if (at("/scores"))      return reply([{ levelId: 1, accountId: 1, player: "Test", percent: 100 }]);
-  if (at("/settings"))    return reply({});
   if (at("/prices"))      return reply(FAKE_PRICES);
   if (at("/leaderboard")) return reply([{ id: 1, name: "Test", skin: FAKE_SKIN, coinsEarnedTotal: 120 }]);
   if (at("/runs"))        return reply({ credited: 2, balance: 52, coinsEarnedTotal: 122,
@@ -176,9 +177,9 @@ const DIE_LEVEL = "...................^.......^....###...###....o......^^...##..
     catch (e) { problem = problem || (what + "\n" + e.stack); }
   }
 
-  function playFor(what, levelText, messages, reward) {
+  function playFor(what, levelText, messages, extras) {
     check(what, () => {
-      game.startLevel(game.parseLevel(levelText, messages), false, false, 0, 2, 1, reward);
+      game.startLevel(game.parseLevel(levelText, messages), false, false, 0, 2, 1, extras);
       for (let f = 0; f < 800; f++) {
         for (let k = 0; k < 4; k++) game.stepPhysics(game.simState, game.FIXED_DT);
         game.drainSimEvents();
@@ -200,8 +201,19 @@ const DIE_LEVEL = "...................^.......^....###...###....o......^^...##..
     // The win level is played as its own character, so the enforced skin, the
     // "New look!" line on the win screen and the unlock all really run.
     playFor("played a level to the finish (HUD, coins, sign, level look, WIN screen)",
-      WIN_LEVEL, WIN_MESSAGES, { name: "The Crow", skin: FAKE_CROW });
+      WIN_LEVEL, WIN_MESSAGES, { reward: { name: "The Crow", skin: FAKE_CROW } });
     playFor("died on a level (explosion, death screen, respawn)", DIE_LEVEL);
+
+    // A level may bend some of the game's numbers while you're inside it, and
+    // must hand every one of them back when you leave (see js/rules.js).
+    const normalGravity = game.CONFIG.GRAVITY;
+    playFor("played a level that bends the rules (moon gravity)", WIN_LEVEL, WIN_MESSAGES,
+      { rules: { GRAVITY: 1500 } });
+    check("a level's rules are really in force while you play it",
+      () => { if (game.CONFIG.GRAVITY !== 1500) throw new Error("GRAVITY is " + game.CONFIG.GRAVITY + ", wanted 1500"); });
+    game.leaveGame();
+    check("...and are handed back when you leave",
+      () => { if (game.CONFIG.GRAVITY !== normalGravity) throw new Error("GRAVITY stayed at " + game.CONFIG.GRAVITY); });
 
     check("the menu builds", () => game.buildMenu([
       { id: 1, name: "Level One", author: "kid", ownerId: 1, level: "..|", song: 0, theme: 0 },
@@ -230,6 +242,12 @@ const DIE_LEVEL = "...................^.......^....###...###....o......^^...##..
     check("the level editor opens (ceiling ramps and a sign)", () => game.openLevelForEdit(
       { id: 2, name: "Upside down", author: "kid", ownerId: 1, song: 0, theme: 0,
         level: "..L7.!\n..u..|", messages: { "5,0": "Mind your head!" } }));
+    // ...and one that bends the rules, so the ⚙ Rules pop-up really builds.
+    check("the level editor opens (a level with its own rules)", () => {
+      game.openLevelForEdit({ id: 3, name: "Moon Hop", author: "kid", ownerId: 1, level: "..|",
+                              song: 0, theme: 0, rules: { GRAVITY: 1500, FLY_THRUST: 4200 } });
+      document.getElementById("rulesBtn").onclick();
+    });
   }
 
   fs.rmSync(TMP, { recursive: true, force: true });

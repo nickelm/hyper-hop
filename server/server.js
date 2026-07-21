@@ -4,7 +4,7 @@
    A small Node + Express app. It does three jobs:
 
      1. Serves the game (the files in ../public) to any tablet.
-     2. Keeps everyone's levels, settings, scores, players and coins
+     2. Keeps everyone's levels, scores, players and coins
         in flat JSON files in ../data  (no database — just files!).
         All the file work lives in lib/storage.js.
      3. Works out who is logged in and what they're allowed to change
@@ -38,7 +38,6 @@ const { migrate } = require("./lib/migrate");
 const { READ_ONLY } = require("./lib/auth");
 const authRoutes = require("./routes/auth");
 const levelsRoutes = require("./routes/levels");
-const settingsRoutes = require("./routes/settings");
 const scoresRoutes = require("./routes/scores");
 const accountsRoutes = require("./routes/accounts");
 const runsRoutes = require("./routes/runs");
@@ -71,7 +70,6 @@ app.use(express.static(publicDir, {
 // so this one is mounted on plain "/api".
 app.use("/api", authRoutes);
 app.use("/api/levels", levelsRoutes);
-app.use("/api/settings", settingsRoutes);
 app.use("/api/scores", scoresRoutes);
 app.use("/api/accounts", accountsRoutes);
 app.use("/api/runs", runsRoutes);

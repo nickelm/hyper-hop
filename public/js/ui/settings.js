@@ -1,43 +1,29 @@
 // ============================================================
-// settings.js — the Control Panel (sliders and switches).
+// settings.js — the Control Panel (sound and comfort).
 // ============================================================
-// The gear button opens this. Every slider changes a CONFIG number
-// live while you play (the game pauses while it's open). The ★ ones
-// can be saved "for everyone" — those go to the server so all the
-// tablets get them.
+// The gear button opens this. It holds the things that are about
+// YOUR tablet, not about the game: how loud the music is, whether
+// there is a trail, how much the screen shakes. They last while this
+// page is open and are saved nowhere.
+//
+// How the game PLAYS — gravity, jump power, how fast the rocket
+// pushes — is not in here at all any more. Those numbers belong to
+// each LEVEL now (the ⚙ Rules button in the level editor), so a moon
+// level and a heavy level can both exist. The numbers they start from
+// live in js/config.js.
 
 import { CONFIG, DEFAULTS } from "../config.js";
 import { Music } from "../music.js";
-import { apiWrite } from "../api.js";
-import { showToast } from "./toast.js";
 
 // The bit of the game the panel needs to know about (are we playing?
 // which song?). main.js hands it over in initSettings().
 let S = null;
-// "Is this player allowed to…?" — main.js hands us login.js's checker.
-// Until it does, assume no, so the ★ buttons stay hidden.
-let may = () => false;
 
 // Each slider: [CONFIG name, label the kids see, smallest, biggest, step]
 const PANEL_SLIDERS = [
-  ["SCROLL_SPEED", "Scroll speed", 100, 800, 10],
-  ["GRAVITY",      "Gravity",      1000, 14000, 100],
-  ["JUMP_POWER",   "Jump power",   800, 3500, 50],
-  ["PAD_POWER",    "Bounce pad power", 600, 2500, 50],
-  ["SPIN_SPEED",   "Spin speed",   0, 900, 10],
-  ["CAMERA_X",     "Camera position (0 = left edge, 0.5 = middle)", 0.1, 0.5, 0.01],
-  ["TILE",         "Tile size",    24, 64, 1],
-  ["PLAYER_SIZE",  "Cube size",    16, 60, 1],
-  ["SPIKE_MERCY",  "Spike mercy",  0, 0.5, 0.05],
   ["SCREEN_SHAKE", "Screen shake", 0, 30, 1],
   ["MUSIC_VOLUME", "Music volume", 0, 1, 0.05],
   ["MUSIC_BPM",    "Music speed (0 = each song's own)", 0, 200, 1],
-];
-// Each color picker: [CONFIG name, label]
-const PANEL_COLORS = [
-  ["PLAYER_COLOR", "Cube color"],
-  ["SKY_TOP",      "Sky top color"],
-  ["SKY_BOTTOM",   "Sky bottom color"],
 ];
 // Each switch: [CONFIG name, label]
 const PANEL_TOGGLES = [
@@ -46,14 +32,10 @@ const PANEL_TOGGLES = [
   ["MUSIC", "Music"],
   ["BEAT_PULSE", "Beat pulse"],
 ];
-// The settings that "Save for everyone" shares with all players (marked ★
-// in the panel). Everything else in the panel is just for this visit.
-const SHARED_KEYS = [
-  "SCROLL_SPEED", "GRAVITY", "JUMP_POWER", "PAD_POWER", "SPIKE_MERCY",
-  "PLAYER_COLOR", "SKY_TOP", "SKY_BOTTOM", "SOUND", "MUSIC", "MUSIC_BPM",
-];
-const sharedSet = new Set(SHARED_KEYS);
-const star = key => (sharedSet.has(key) ? "★ " : "");
+// Everything the panel touches, so Reset can put back exactly those and
+// nothing else. (A whole-CONFIG reset would wipe the rules of the level
+// you're playing right now — see js/rules.js.)
+const PANEL_KEYS = [...PANEL_SLIDERS.map(s => s[0]), ...PANEL_TOGGLES.map(t => t[0])];
 
 const panelControlsEl = document.getElementById("panelControls");
 function buildPanel() {
@@ -62,7 +44,7 @@ function buildPanel() {
     const wrap = document.createElement("div");
     wrap.className = "ctrl";
     wrap.innerHTML =
-      '<div class="row"><span>' + star(key) + label + '</span><span class="val"></span></div>' +
+      '<div class="row"><span>' + label + '</span><span class="val"></span></div>' +
       '<input type="range" min="' + min + '" max="' + max + '" step="' + step + '">';
     const slider = wrap.querySelector("input");
     const valEl = wrap.querySelector(".val");
@@ -77,22 +59,11 @@ function buildPanel() {
     });
     panelControlsEl.appendChild(wrap);
   }
-  for (const [key, label] of PANEL_COLORS) {
-    const wrap = document.createElement("div");
-    wrap.className = "ctrl";
-    wrap.innerHTML =
-      '<div class="row"><span>' + star(key) + label + '</span></div>' +
-      '<input type="color">';
-    const picker = wrap.querySelector("input");
-    picker.value = CONFIG[key];
-    picker.addEventListener("input", () => { CONFIG[key] = picker.value; });
-    panelControlsEl.appendChild(wrap);
-  }
   for (const [key, label] of PANEL_TOGGLES) {
     const wrap = document.createElement("div");
     wrap.className = "ctrl toggle";
     wrap.innerHTML =
-      '<label class="row"><span>' + star(key) + label + '</span>' +
+      '<label class="row"><span>' + label + '</span>' +
       '<input type="checkbox"' + (CONFIG[key] ? " checked" : "") + '></label>';
     const box = wrap.querySelector("input");
     box.addEventListener("change", () => {
@@ -111,12 +82,6 @@ export function openPanel() {
   if (S.screen === "game") S.paused = true;
   buildPanel();                 // fill in the sliders with the current numbers
   document.getElementById("closePanelBtn").textContent = (S.screen === "game") ? "Close & play" : "Close";
-  // The two ★ "for everyone" buttons change the game for EVERY player, so
-  // only a grown-up sees them. Anybody can still play with the sliders —
-  // that just changes their own game, for this visit.
-  const forEveryone = may("settings.edit");
-  document.getElementById("saveEveryoneBtn").classList.toggle("hidden", !forEveryone);
-  document.getElementById("resetEveryoneBtn").classList.toggle("hidden", !forEveryone);
   document.getElementById("controlPanel").classList.remove("hidden");
 }
 export function closePanel() {
@@ -124,44 +89,19 @@ export function closePanel() {
   if (S.screen === "game") S.paused = false;
 }
 
-// Put the live music settings back in step with CONFIG after a reset.
-function applyMusicSettings() {
-  Music.setVolume(CONFIG.MUSIC_VOLUME);
-  Music.setBpm(CONFIG.MUSIC_BPM);
-}
-
 // Wire up the panel's buttons. main.js calls this once at startup.
 export function initSettings(deps) {
   S = deps.S;
-  if (deps.may) may = deps.may;
 
   document.getElementById("closePanelBtn").onclick = closePanel;
 
-  // Reset just for me: back to the code defaults, this visit only.
+  // Reset: put the panel's own settings back the way the game ships.
+  // ONLY the panel's own — the level you're playing may have borrowed
+  // some of the game's other numbers, and those are not ours to touch.
   document.getElementById("resetCfgBtn").onclick = () => {
-    Object.assign(CONFIG, DEFAULTS);   // put every number back the way it started
-    applyMusicSettings();
+    for (const key of PANEL_KEYS) CONFIG[key] = DEFAULTS[key];
+    Music.setVolume(CONFIG.MUSIC_VOLUME);
+    Music.setBpm(CONFIG.MUSIC_BPM);
     buildPanel();                      // and update the sliders to match
-  };
-
-  // Save for everyone: send the ★ settings to the server so every player gets them.
-  document.getElementById("saveEveryoneBtn").onclick = async () => {
-    const overrides = {};
-    for (const k of SHARED_KEYS) overrides[k] = CONFIG[k];
-    try {
-      await apiWrite("PUT", "/settings", overrides);
-      showToast("Saved for everyone!");
-    } catch (e) { showToast(e.message); }
-  };
-
-  // Reset for everyone: clear the server's shared settings and go back to defaults.
-  document.getElementById("resetEveryoneBtn").onclick = async () => {
-    try {
-      await apiWrite("PUT", "/settings", {});
-      Object.assign(CONFIG, DEFAULTS);
-      applyMusicSettings();
-      buildPanel();
-      showToast("Reset for everyone!");
-    } catch (e) { showToast(e.message); }
   };
 }

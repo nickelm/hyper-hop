@@ -8,7 +8,7 @@ the coins, and reach the finish flag.
 
 > The game (in `public/`) is plain HTML/CSS/JS — no build step, no frameworks, no
 > client dependencies. A tiny Node + Express server (`server/`) stores everyone's
-> levels and shared settings so the kids can save straight from their tablets. It's
+> levels, accounts and coins so the kids can save straight from their tablets. It's
 > a family project: built by a professor with two 9-year-old co-developers who
 > design the levels and tune the game.
 
@@ -28,8 +28,8 @@ The first thing you'll see is **Who's playing?** — tap **+ New player**, pick 
 name and a password (4 letters or more), and you're in. Everybody gets their own
 account, their own cube, and their own purse of coins.
 
-The first run creates a `data/` folder with the starter levels. Levels, accounts,
-scores and settings are saved there (and backed up automatically); it's gitignored
+The first run creates a `data/` folder with the starter levels. Levels, accounts
+and scores are saved there (and backed up automatically); it's gitignored
 on purpose.
 
 ## Coins
@@ -92,20 +92,28 @@ Tap **✎ Level Editor** on the menu to open it:
 (The **Copy code** button still exports a paste-ready level string as a manual
 backup.)
 
-## Shared settings
+## Each level's own rules
 
-Tap the **⚙ Settings** gear on the menu (or in-game) to open the Control Panel.
-Changes are just for you until you tap **★ Save for everyone**, which saves the
-starred settings (speed, gravity, jump, colors, sound, music…) to the server for
-all players. **Reset for everyone** puts them back to the defaults.
+A level can bend some of the game's numbers while you're inside it — moon
+gravity, a giant jump, a fiercer rocket. Open a level in the editor and tap
+**⚙ Rules**: one slider per number, each saying *normal* until you move it, a ↺
+to put one back, and **▶ Try it** to go and feel the change. Only the numbers you
+actually changed are saved, and they only apply to that level — everything else
+carries on as usual.
+
+## Settings
+
+The **⚙ Settings** gear on the menu (or in-game) holds the things about *your
+tablet*: music volume, music speed, sound and music on/off, the beat pulse, the
+glowing trail, and screen shake. They're just for you and aren't saved anywhere.
 
 ## Tweaking the game
 
-Open `public/js/config.js` — that one file is the game's control panel. Every
-gameplay number is there with a kid-friendly comment — gravity, jump power, cube
-size, colors, sound, screen shake, and more. Change a number, refresh the page, and
-see what happens. (These are the *defaults*; the server's saved settings are layered
-on top at startup.)
+Open `public/js/config.js` — that one file is the game's control panel, and the
+only place these numbers are set. Every gameplay number is there with a
+kid-friendly comment — gravity, jump power, cube size, colors, sound, screen
+shake, and more. Change a number, refresh the page, and see what happens. Levels
+start from these and may bend a few of them (see above).
 
 The rest of the game is split into small files under `public/js/`, one job each —
 `game/physics.js` is the rules of the world, `game/render.js` draws it, `ui/editor.js`
