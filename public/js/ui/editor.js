@@ -14,6 +14,7 @@ import { parseLevel } from "../game/level.js";
 import { Music, SONGS } from "../music.js";
 import { apiWrite } from "../api.js";
 import { showToast } from "./toast.js";
+import { initScrollbars } from "./scrollbars.js";
 
 // Filled in by initEditor().
 let S = null;
@@ -33,6 +34,7 @@ export function initEditor(deps) {
 const ED = {
   rows: CONFIG.LEVEL_ROWS, cols: 40,
   grid: [],
+  messages: {},                   // what each  !  sign says: { "col,row": "HOLD to fly!" }
   tool: "#",
   cell: 24,                       // on-screen size of one editor square (worked out to fit)
   zoom: 0,                        // 0 = the whole level fits on screen; each step is one 🔍+ tap
@@ -44,27 +46,43 @@ const ED = {
 function edInit() {
   ED.rows = CONFIG.LEVEL_ROWS;
   ED.grid = Array.from({ length: ED.rows }, () => Array(ED.cols).fill("."));
+  ED.messages = {};
 }
 edInit();
 
 // Load a level someone made earlier into the editor. Old levels were only a few
 // rows tall, so we add empty sky on TOP until they're as tall as every level is
 // now. The bottom row always stays on the floor, so nothing you built moves.
-function edLoadGrid(parsed) {
+//
+// The signs have to move down by those same rows, or every message would end up
+// pointing at the wrong square.
+function edLoadGrid(parsed, messages) {
   ED.cols = parsed.cols;
   ED.grid = parsed.grid.map(row => row.split(""));
-  while (ED.grid.length < CONFIG.LEVEL_ROWS) ED.grid.unshift(Array(ED.cols).fill("."));
+  let addedRows = 0;
+  while (ED.grid.length < CONFIG.LEVEL_ROWS) { ED.grid.unshift(Array(ED.cols).fill(".")); addedRows++; }
   ED.rows = ED.grid.length;
   ED.zoom = 0;                    // start by showing the whole level
+  ED.messages = {};
+  for (const [key, text] of Object.entries(messages || {})) {
+    const [col, row] = key.split(",").map(Number);
+    if (!Number.isFinite(col) || !Number.isFinite(row)) continue;
+    ED.messages[col + "," + (row + addedRows)] = text;
+  }
 }
 
 // The editor palette. Tiles are shown in groups; a { sep: true } entry leaves a
 // little gap so the new tiles read as their own family (platforms, boosts, etc.).
+// Every button shows its NAME under the picture: an iPad has nothing to hover
+// with, so a tooltip would never be seen. Keep the names short \u2014 they have to
+// fit under a 58-pixel button.
 const TOOLS = [
   { ch: ".", icon: "\u232B", label: "erase" },
   { ch: "#", icon: "\u2B1B", label: "block" },
   { ch: "/",  icon: "\u25E2", label: "up ramp" },    // \u25E2 filled lower-right triangle
   { ch: "\\", icon: "\u25E3", label: "down ramp" },  // \u25E3 filled lower-left triangle
+  { ch: "L",  icon: "\u25e5", label: "up ramp \u2191" },   // \u25e5 upper-right triangle: a ceiling ramp
+  { ch: "7",  icon: "\u25e4", label: "down ramp \u2191" }, // \u25e4 upper-left triangle: the other one
   { ch: "^", icon: "\u25B2", label: "spike" },
   { ch: "o", icon: "\u2B24", label: "pad" },
   { ch: "*", icon: "\u2605", label: "coin" },
@@ -78,18 +96,20 @@ const TOOLS = [
   { sep: true },                                      // ---- hazards ----
   { ch: "s", icon: "\u2699", label: "saw" },         // \u2699 gear = spinning saw blade
   { sep: true },                                      // ---- portals ----
-  { ch: ">", icon: "\u00bb", label: "fast portal" },  // \u00bb = speed up
-  { ch: "<", icon: "\u00ab", label: "slow portal" },  // \u00ab = slow down
-  { ch: "u", icon: "\u2191", label: "flip gravity" }, // \u2191 = fall upward
-  { ch: "n", icon: "\u2193", label: "normal gravity" }, // \u2193 = fall down again
-  { ch: "f", icon: "\u2708", label: "fly portal" },   // \u2708 wings = become a rocket (HOLD to climb)
-  { ch: "c", icon: "\u25a0", label: "cube portal" },  // \u25a0 square = back to a normal cube
-  { ch: "h", icon: "\u2715", label: "hole (ground off)" }, // \u2715 = no ground, you fall out!
-  { ch: "g", icon: "\u25ac", label: "ground back on" },    // \u25ac = solid ground again
-  { sep: true },                                      // ---- checkpoint ----
+  { ch: ">", icon: "\u00bb", label: "faster" },       // \u00bb = speed up
+  { ch: "<", icon: "\u00ab", label: "slower" },       // \u00ab = slow down
+  { ch: "u", icon: "\u2191", label: "flip \u2191" },  // \u2191 = fall upward
+  { ch: "n", icon: "\u2193", label: "normal \u2193" },  // \u2193 = fall down again
+  { ch: "f", icon: "\u2708", label: "fly" },          // \u2708 wings = become a rocket (HOLD to climb)
+  { ch: "c", icon: "\u25a0", label: "cube" },         // \u25a0 square = back to a normal cube
+  { ch: "h", icon: "\u2715", label: "hole" },         // \u2715 = no ground, you fall out!
+  { ch: "g", icon: "\u25ac", label: "ground on" },    // \u25ac = solid ground again
+  { sep: true },                                      // ---- checkpoint and signs ----
   { ch: "@", icon: "\u2691", label: "checkpoint" },  // \u2691 flag = checkpoint
+  { ch: "!", icon: "\ud83d\udcac", label: "sign" },  // \ud83d\udcac = a message for whoever plays
 ];
 const paletteEl = document.getElementById("palette");
+const tileBtns = [];
 TOOLS.forEach(t => {
   if (t.sep) {                                        // a spacer between groups of tiles
     const s = document.createElement("div");
@@ -99,12 +119,17 @@ TOOLS.forEach(t => {
   }
   const b = document.createElement("div");
   b.className = "tileBtn" + (t.ch === ED.tool ? " selected" : "");
-  b.textContent = t.icon; b.title = t.label;
+  const icon = document.createElement("div");
+  icon.className = "tileIcon"; icon.textContent = t.icon;
+  const name = document.createElement("div");
+  name.className = "tileLabel"; name.textContent = t.label;
+  b.appendChild(icon); b.appendChild(name);
   b.onclick = () => {
     ED.tool = t.ch;
-    [...paletteEl.children].forEach(c => c.classList.remove("selected"));
+    tileBtns.forEach(c => c.classList.remove("selected"));
     b.classList.add("selected");
   };
+  tileBtns.push(b);
   paletteEl.appendChild(b);
 });
 
@@ -117,11 +142,18 @@ const eWrap = document.getElementById("editorGridWrap");
    Tablets are all different sizes, so we don't pick a number — we
    work it out. At zoom 0 the WHOLE level is shrunk to fit the space
    we have, so it can never be cut off. Each tap on  🔍+  makes the
-   squares bigger (and then the grid is bigger than the screen, so
-   you can slide it around with a finger).
+   squares bigger — as big as MAX_CELL, which is far past "the whole
+   level fits", so you can get right in close to fiddle with one
+   corner. Once the grid is bigger than the box you see it in, the
+   scroll bars appear and you slide it around with them.
    ---------------------------------------------------------------- */
-const MIN_CELL = 8, MAX_CELL = 40;
+const MIN_CELL = 8, MAX_CELL = 72;
 const ZOOM_STEP = 1.3;
+const MAX_ZOOM = 10;             // how many times you can tap 🔍+
+// A tablet gives up if you ask it to draw a picture bigger than this (it just
+// goes blank), so a very WIDE level can't be zoomed in quite as far as a short
+// one. Without this, zooming right in on a 300-square level would show nothing.
+const MAX_CANVAS = 8192;
 
 function fitCell() {
   // How much room the grid has. If the editor isn't on screen yet we
@@ -132,22 +164,21 @@ function fitCell() {
   return Math.min(availW / ED.cols, availH / ED.rows);   // fit BOTH ways
 }
 function computeCell() {
-  const c = fitCell() * Math.pow(ZOOM_STEP, ED.zoom);
-  return Math.max(MIN_CELL, Math.min(MAX_CELL, Math.floor(c)));
+  const wanted = fitCell() * Math.pow(ZOOM_STEP, ED.zoom);
+  const biggest = Math.min(MAX_CELL, Math.floor(MAX_CANVAS / Math.max(ED.cols, ED.rows, 1)));
+  return Math.max(MIN_CELL, Math.min(biggest, Math.floor(wanted)));
 }
-// Is the grid actually bigger than the space we have? (Not just "did they
-// zoom in" — a very wide level can spill over even at zoom 0.) If it spills,
-// a finger has to SLIDE it around instead of drawing on it.
-let scrollable = false;
-function canScroll() { return scrollable; }
+
+// Our own scroll bars (js/ui/scrollbars.js) — a finger on the canvas always
+// paints, so these are how you move around a level that doesn't fit.
+const bars = initScrollbars({
+  wrap: eWrap,
+  xBar: document.getElementById("edScrollX"),
+  yBar: document.getElementById("edScrollY"),
+});
 
 function drawEditor() {
   ED.cell = computeCell();
-  scrollable = (ED.cols * ED.cell > eWrap.clientWidth - 20) ||
-               (ED.rows * ED.cell > eWrap.clientHeight - 20);
-  // When the whole level fits, a finger draws. When it doesn't, a finger
-  // slides the grid around and a TAP draws one square.
-  eCanvas.style.touchAction = scrollable ? "pan-x pan-y" : "none";
   const c = ED.cell;
   eCanvas.width = ED.cols * c; eCanvas.height = ED.rows * c;
   eCtx.fillStyle = "#1a1a38"; eCtx.fillRect(0, 0, eCanvas.width, eCanvas.height);
@@ -155,11 +186,14 @@ function drawEditor() {
     const x = col * c, y = r * c, ch = ED.grid[r][col];
     eCtx.strokeStyle = "rgba(255,255,255,.08)"; eCtx.strokeRect(x, y, c, c);
     if (ch === "#") { eCtx.fillStyle = CONFIG.BLOCK_COLOR; eCtx.fillRect(x+2, y+2, c-4, c-4); }
-    else if (ch === "/" || ch === "\\") {
+    else if (ch === "/" || ch === "\\" || ch === "L" || ch === "7") {
+      // the floor ramps ( / \ ) and their upside-down twins for the ceiling ( L 7 )
       eCtx.fillStyle = CONFIG.BLOCK_COLOR;
       eCtx.beginPath();
-      if (ch === "/") { eCtx.moveTo(x, y+c); eCtx.lineTo(x+c, y+c); eCtx.lineTo(x+c, y); }
-      else            { eCtx.moveTo(x, y); eCtx.lineTo(x+c, y+c); eCtx.lineTo(x, y+c); }
+      if (ch === "/")       { eCtx.moveTo(x, y+c); eCtx.lineTo(x+c, y+c); eCtx.lineTo(x+c, y); }
+      else if (ch === "\\") { eCtx.moveTo(x, y); eCtx.lineTo(x+c, y+c); eCtx.lineTo(x, y+c); }
+      else if (ch === "L")  { eCtx.moveTo(x, y); eCtx.lineTo(x+c, y); eCtx.lineTo(x+c, y+c); }
+      else                  { eCtx.moveTo(x, y); eCtx.lineTo(x+c, y); eCtx.lineTo(x, y+c); }
       eCtx.closePath(); eCtx.fill();
     }
     else if (ch === "^") {
@@ -183,6 +217,20 @@ function drawEditor() {
       eCtx.beginPath(); eCtx.moveTo(x+c/2, y+c-3); eCtx.lineTo(x+c/2, y+4); eCtx.stroke();
       eCtx.fillStyle = "#7dff5e";
       eCtx.beginPath(); eCtx.moveTo(x+c/2, y+4); eCtx.lineTo(x+c/2+10, y+9); eCtx.lineTo(x+c/2, y+14); eCtx.closePath(); eCtx.fill();
+    }
+    else if (ch === "!") {   // a sign: a little board on a post (tap it to write on it)
+      eCtx.fillStyle = "#8a8aa0";
+      eCtx.fillRect(x+c/2-1, y+c/2, 3, c/2-3);
+      eCtx.fillStyle = CONFIG.SIGN_COLOR;
+      eCtx.fillRect(x+3, y+4, c-6, c/2-4);
+      eCtx.strokeStyle = CONFIG.SIGN_TEXT_COLOR; eCtx.lineWidth = 2;
+      eCtx.strokeRect(x+3, y+4, c-6, c/2-4);
+      // a wiggle of "writing", so you can see at a glance which signs have words
+      if (ED.messages[col + "," + r]) {
+        eCtx.fillStyle = CONFIG.SIGN_TEXT_COLOR;
+        eCtx.fillRect(x+6, y+8, c-12, 2);
+        eCtx.fillRect(x+6, y+13, c-16, 2);
+      }
     }
     else if (ch === ">" || ch === "<") {   // a speed portal (green fast / blue slow)
       eCtx.fillStyle = ch === ">" ? "#3dff7a" : "#3aa0ff";
@@ -218,43 +266,145 @@ function drawEditor() {
   // floor hint
   eCtx.fillStyle = "rgba(255,255,255,.5)";
   eCtx.fillRect(0, eCanvas.height - 2, eCanvas.width, 2);
+  bars.refresh();                        // the grid changed size — move the scroll bars to match
 }
-function edPaint(e) {
+
+// Paint one square. A finger dragged across the grid comes through here over
+// and over, which is how you draw a whole row of blocks in one go.
+//
+// `firstTouch` is true only for the square you press on. That's the one a sign
+// asks you to write on — otherwise dragging a row of signposts would pop the
+// keyboard up over and over.
+function edPaint(e, firstTouch) {
   const rect = eCanvas.getBoundingClientRect();
   const col = Math.floor((e.clientX - rect.left) / ED.cell);
   const r   = Math.floor((e.clientY - rect.top) / ED.cell);
   if (r < 0 || r >= ED.rows || col < 0 || col >= ED.cols) return;
+  // Dragging a finger sends this square after square; redrawing the whole grid
+  // for one that is ALREADY what you're painting would just make it stutter.
+  if (ED.grid[r][col] === ED.tool && ED.tool !== "!") return;
   ED.grid[r][col] = ED.tool;
+  // Painting over a square wipes the sign that used to be there, so a message
+  // can never be left behind pointing at a block.
+  if (ED.tool !== "!") delete ED.messages[col + "," + r];
   drawEditor();
+  if (ED.tool === "!" && firstTouch) openSignBox(col, r);   // what should this sign say?
 }
+
+/* ----------------------------------------------------------------
+   DRAWING WITH A FINGER. A finger on the grid always paints — never
+   slides — because the scroll bars are what moves the view. To make
+   long runs easy anyway, painting right at the edge of the box keeps
+   the grid sliding underneath your finger.
+   ---------------------------------------------------------------- */
+const EDGE = 40;                 // how close to the edge starts the sliding (pixels)
+const EDGE_SCROLL_SPEED = 12;    // how far it slides each frame
+
 let painting = false;
-let downAt = null, dragged = false;      // for telling a TAP apart from a slide
+let lastPoint = null;            // where the finger is right now (for the edge sliding)
+let edgeTimer = null;
+
+function edgeScrollStep() {
+  edgeTimer = null;
+  if (!painting || !lastPoint) return;
+  const r = eWrap.getBoundingClientRect();
+  let dx = 0, dy = 0;
+  if (lastPoint.x < r.left + EDGE)   dx = -EDGE_SCROLL_SPEED;
+  if (lastPoint.x > r.right - EDGE)  dx =  EDGE_SCROLL_SPEED;
+  if (lastPoint.y < r.top + EDGE)    dy = -EDGE_SCROLL_SPEED;
+  if (lastPoint.y > r.bottom - EDGE) dy =  EDGE_SCROLL_SPEED;
+  if (dx || dy) {
+    eWrap.scrollLeft += dx; eWrap.scrollTop += dy;
+    edPaint(lastPoint);                       // keep painting as the grid slides by
+  }
+  edgeTimer = requestAnimationFrame(edgeScrollStep);
+}
+function startPainting(e) {
+  painting = true;
+  lastPoint = { clientX: e.clientX, clientY: e.clientY, x: e.clientX, y: e.clientY };
+  if (edgeTimer === null) edgeTimer = requestAnimationFrame(edgeScrollStep);
+}
+function stopPainting() {
+  painting = false; lastPoint = null;
+  if (edgeTimer !== null) { cancelAnimationFrame(edgeTimer); edgeTimer = null; }
+}
+
 eCanvas.addEventListener("pointerdown", e => {
-  e.stopPropagation();
-  downAt = { x: e.clientX, y: e.clientY }; dragged = false;
-  if (canScroll()) return;               // zoomed in: wait and see if it's a slide
-  painting = true; edPaint(e);           // fits on screen: draw straight away
+  e.preventDefault(); e.stopPropagation();
+  eCanvas.setPointerCapture(e.pointerId);
+  startPainting(e); edPaint(e, true);
 });
 eCanvas.addEventListener("pointermove", e => {
-  if (painting) { edPaint(e); return; }
-  if (downAt && Math.abs(e.clientX - downAt.x) + Math.abs(e.clientY - downAt.y) > 8) dragged = true;
+  if (!painting) return;
+  lastPoint = { clientX: e.clientX, clientY: e.clientY, x: e.clientX, y: e.clientY };
+  edPaint(e);
 });
-eCanvas.addEventListener("pointerup", e => {
-  if (!painting && downAt && !dragged) edPaint(e);   // a tap, not a slide: draw one square
-  downAt = null;
-});
-// The browser takes the gesture over when it starts scrolling — stop drawing.
-eCanvas.addEventListener("pointercancel", () => { painting = false; downAt = null; });
-window.addEventListener("pointerup", () => painting = false);
+eCanvas.addEventListener("pointerup", stopPainting);
+eCanvas.addEventListener("pointercancel", stopPainting);
+window.addEventListener("pointerup", stopPainting);
 
-// Zoom buttons, and redraw if the tablet is turned around.
+/* ----------------------------------------------------------------
+   SIGNS. A  !  square is a signpost; what it SAYS is kept in
+   ED.messages, in a little list of "column,row" → the words. Tap a
+   sign with the 💬 tool to write on it (or to change it later).
+   ---------------------------------------------------------------- */
+const signBox = document.getElementById("messageBox");
+const signInput = document.getElementById("messageInput");
+let signSquare = null;             // "col,row" of the sign we're writing on
+
+function openSignBox(col, row) {
+  signSquare = col + "," + row;
+  signInput.value = ED.messages[signSquare] || "";
+  signBox.classList.remove("hidden");
+  setTimeout(() => signInput.focus(), 50);
+}
+function closeSignBox() { signBox.classList.add("hidden"); signSquare = null; }
+
+document.getElementById("messageOkBtn").onclick = () => {
+  if (signSquare === null) return;
+  const words = signInput.value.trim();
+  if (words) ED.messages[signSquare] = words;
+  else delete ED.messages[signSquare];     // no words = just an empty signpost
+  closeSignBox(); drawEditor();
+};
+// "Remove" takes the whole sign away — the words AND the post.
+document.getElementById("messageDeleteBtn").onclick = () => {
+  if (signSquare === null) return;
+  const [col, row] = signSquare.split(",").map(Number);
+  delete ED.messages[signSquare];
+  if (ED.grid[row] && ED.grid[row][col] === "!") ED.grid[row][col] = ".";
+  closeSignBox(); drawEditor();
+};
+document.getElementById("messageCancelBtn").onclick = closeSignBox;
+
+/* ----------------------------------------------------------------
+   ZOOM. Tapping 🔍+ / 🔍− keeps whatever you were looking at in the
+   middle of the box, instead of throwing you back to the top-left
+   corner of the level.
+   ---------------------------------------------------------------- */
+function zoomBy(step) {
+  // where the middle of the view is, as a fraction of the whole grid (0..1)
+  const midX = (eWrap.scrollLeft + eWrap.clientWidth / 2) / Math.max(1, eCanvas.width);
+  const midY = (eWrap.scrollTop + eWrap.clientHeight / 2) / Math.max(1, eCanvas.height);
+  const before = ED.cell;
+  const wanted = Math.max(0, Math.min(MAX_ZOOM, ED.zoom + step));
+  if (wanted === ED.zoom) return;
+  ED.zoom = wanted;
+  drawEditor();
+  // Nothing actually got bigger? Then this is as close as this tablet can draw
+  // (see MAX_CANVAS) — put the zoom back, so 🔍− works on the very next tap.
+  if (step > 0 && ED.cell === before) { ED.zoom -= step; drawEditor(); return; }
+  eWrap.scrollLeft = midX * eCanvas.width - eWrap.clientWidth / 2;
+  eWrap.scrollTop  = midY * eCanvas.height - eWrap.clientHeight / 2;
+  bars.refresh();
+}
 document.getElementById("zoomInBtn").onclick = () => {
-  if (ED.zoom >= 6 || ED.cell >= MAX_CELL) return;
-  ED.zoom++; drawEditor();
+  if (ED.zoom >= MAX_ZOOM || ED.cell >= MAX_CELL) return;
+  zoomBy(1);
 };
 document.getElementById("zoomOutBtn").onclick = () => {
   if (ED.zoom <= 0) return;              // 0 = the whole level already fits
-  ED.zoom--; drawEditor();
+  zoomBy(-1);
 };
 window.addEventListener("resize", () => { if (S && S.screen === "editor") drawEditor(); });
 
@@ -265,6 +415,10 @@ document.getElementById("widerBtn").onclick = () => {
 document.getElementById("narrowBtn").onclick = () => {
   if (ED.cols <= 20) return;
   ED.cols -= 10; ED.grid.forEach(row => row.length = ED.cols);
+  // any signs in the part we just cut off go with it
+  for (const key of Object.keys(ED.messages)) {
+    if (Number(key.split(",")[0]) >= ED.cols) delete ED.messages[key];
+  }
   drawEditor();
 };
 document.getElementById("clearBtn").onclick = () => { edInit(); drawEditor(); };
@@ -295,7 +449,7 @@ function edToText() {
   return ED.grid.map(row => row.join("")).join("\n");
 }
 document.getElementById("playTestBtn").onclick = () => {
-  startLevel(parseLevel(edToText()), true, false, ED.song, ED.theme);
+  startLevel(parseLevel(edToText(), ED.messages), true, false, ED.song, ED.theme);
 };
 // Make the level's name safe to drop inside "..." in the exported code,
 // so a name with a quote in it can't break things.
@@ -307,10 +461,14 @@ function levelName() {
   return n === "" ? "My Level" : n;
 }
 document.getElementById("copyBtn").onclick = () => {
+  // The signs ride along as one extra line. A level with no signs doesn't
+  // get the line at all, so the code looks just like it always did.
+  const signs = Object.keys(ED.messages).length
+    ? "  messages: " + JSON.stringify(ED.messages) + ",\n" : "";
   document.getElementById("exportText").value =
     "{\n  name: \"" + escapeName(levelName()) + "\",\n  song: " + ED.song +
-    ",\n  theme: " + ED.theme +
-    ",\n  level: `\n" + edToText() + "\n`,\n},";
+    ",\n  theme: " + ED.theme + ",\n" + signs +
+    "  level: `\n" + edToText() + "\n`,\n},";
   document.getElementById("exportBox").classList.remove("hidden");
 };
 document.getElementById("closeExportBtn").onclick = () => document.getElementById("exportBox").classList.add("hidden");
@@ -332,6 +490,11 @@ function importLevel(text) {
   const songMatch = text.match(/song:\s*(\d+)/);
   // And the theme number, if it's there.
   const themeMatch = text.match(/theme:\s*(\d+)/);
+  // And the signs, if there are any. Code pasted from before signs existed
+  // simply doesn't have this line, and that's fine.
+  const signsMatch = text.match(/messages:\s*(\{[^}]*\})/);
+  let signs = {};
+  if (signsMatch) { try { signs = JSON.parse(signsMatch[1]); } catch (e) { signs = {}; } }
   // If there is a `...` grid block, use only what's inside the backticks.
   const first = text.indexOf("`"), last = text.lastIndexOf("`");
   const gridText = (first !== -1 && last > first) ? text.slice(first + 1, last) : text;
@@ -339,7 +502,7 @@ function importLevel(text) {
   const parsed = parseLevel(gridText);
   if (parsed.rows === 0 || parsed.cols === 0) { showToast("Couldn't read that"); return; }
 
-  edLoadGrid(parsed);
+  edLoadGrid(parsed, signs);
   if (nameMatch) {
     document.getElementById("levelNameInput").value =
       nameMatch[1].replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
@@ -365,7 +528,8 @@ document.getElementById("closeImportBtn").onclick = () => document.getElementByI
 
 // Actually send the current editor level to the server, then refresh the menu.
 async function saveToServer() {
-  const body = { name: levelName(), author: ED.author, level: edToText(), song: ED.song, theme: ED.theme };
+  const body = { name: levelName(), author: ED.author, level: edToText(),
+                 song: ED.song, theme: ED.theme, messages: ED.messages };
   try {
     let created = null;
     if (ED.editingId != null) {
@@ -413,7 +577,7 @@ document.getElementById("saveCancelBtn").onclick = () => document.getElementById
 // into the editor and show it.
 export function openLevelForEdit(L) {
   const parsed = parseLevel(L.level);
-  edLoadGrid(parsed);
+  edLoadGrid(parsed, L.messages);
   ED.editingId = L.id;                              // remember WHICH level we're changing
   ED.author = L.author || "";
   ED.song = (L.song != null) ? (Number(L.song) % SONGS.length) : 0;

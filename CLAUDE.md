@@ -76,6 +76,8 @@ break existing level strings.
 #  solid block (stand on top; hitting the side = death)
 /  up-ramp   (slope from bottom-left to top-right; ground, never deadly)
 \  down-ramp (slope from top-left to bottom-right; ground, never deadly)
+L  ceiling up-ramp   (the mirror of `/`, hanging from the roof; only while gravity is flipped)
+7  ceiling down-ramp (the mirror of `\`, likewise)
 ^  spike (death; forgiving inner hitbox, see CONFIG.SPIKE_MERCY)
 o  bounce pad (launches upward at CONFIG.PAD_POWER)
 *  coin (collectible)
@@ -95,6 +97,7 @@ f  fly portal    (become a rocket: HOLD to climb, let go to drop)
 c  cube portal   (back to a normal jumping cube)
 h  hole gate     (the ground switches OFF — nothing to stand on)
 g  ground gate   (the ground comes back)
+!  sign          (a message for whoever plays; the words live beside the grid — see Signs)
 ```
 
 Speed portals (`>` `<`) are full-column gates: crossing the column's midline (at
@@ -172,14 +175,29 @@ it every frame. **The ground is drawn column by column inside the world transfor
 is what makes a hole actually look like a hole.
 
 **The editor sizes itself to the tablet.** `ED.cell` is never a fixed number — it
-is worked out each redraw so the *whole* level fits the space available
-(`fitCell()`), with 🔍−/🔍+ zoom steps on top. This matters because the grid is
-14 rows tall now and a tablet's editor area is only a few hundred pixels.
-Whenever the grid does overflow, `editor.js` switches the canvas's `touch-action`
-from `none` to `pan-x pan-y` so a finger **slides** it and a **tap** paints one
-square; when everything fits, dragging paints as it always did. Don't put a fixed
-`touch-action` back on `#editorCanvas` — a `touch-action: none` canvas filling a
-scrollable box makes the box impossible to scroll on a tablet.
+is worked out each redraw so at zoom 0 the *whole* level fits the space available
+(`fitCell()`), with 🔍−/🔍+ steps on top that go far past that, up to `MAX_CELL`,
+so you can get right in close. This matters because the grid is 14 rows tall and a
+tablet's editor area is only a few hundred pixels. One guard: `computeCell()` also
+caps the cell so the canvas never exceeds `MAX_CANVAS` pixels on its longest side —
+a tablet silently draws **nothing** above that, and a 300-square level zoomed right
+in would otherwise go blank. `zoomBy()` notices when a zoom step changed nothing and
+puts it back, so 🔍− always works on the next tap.
+
+**A finger on the editor canvas always paints** — dragging draws a whole run of
+blocks, which is the whole point on a touch screen. So `#editorCanvas` keeps
+`touch-action: none` permanently, and moving around is done with **our own scroll
+bars** (`js/ui/scrollbars.js`, one per axis, hidden when that axis fits) plus
+**edge auto-scroll**: painting within `EDGE` pixels of the edge of
+`#editorGridWrap` slides the grid along under your finger. Don't hand the canvas
+back to the browser's panning (`pan-x pan-y`) — that is exactly what made drawing
+impossible before. The browser's own bars on `#editorGridWrap` stay hidden
+(`scrollbar-width: none` + `::-webkit-scrollbar`), because they're both ugly and
+untouchable on a tablet.
+
+**Every palette button shows its name under its picture** (`.tileIcon` +
+`.tileLabel`). There is no hover on an iPad, so a `title=` tooltip is invisible;
+if you add a tile, give it a short label that fits a 58-pixel button.
 
 Jump-through platforms (`=` `-`) are one-way: the cube lands on the top when
 falling, but passes straight through them from below and from the sides, and they
@@ -197,6 +215,30 @@ micro-hop (CONFIG.RAMP_GLUE). A jump always overrides the glue. A `/` at the foo
 a block stack lets the cube run up onto the stack instead of dying on its side. In
 stored JSON and in the server's seed levels, a down-ramp `\` must be written as
 `\\` so a literal backslash survives encoding.
+
+Ceiling ramps (`L` `7`) are those same two ramps turned upside down, for running
+along the roof after a `u` gate: `L` is the mirror of `/` (it climbs as you go
+right) and `7` the mirror of `\`. **Only the family that matches the way gravity is
+pointing exists** — with gravity normal an `L` or a `7` is simply not there, and
+with gravity flipped a `/` or a `\` is not there. There is still one ramp loop in
+`physics.js`, not two: `up = state.gravityDir` picks the pair of characters and
+mirrors the surface, the stick test, the snap and the tilt, so with normal gravity
+every expression collapses to exactly the code that was there before (which is what
+keeps the golden traces identical). Ramps of either kind still never kill, and
+still do nothing at all while flying.
+
+**Signs (`!`).** A `!` in the grid is a signpost; the *words* live beside the grid
+in the level's `messages`, a little map of `"col,row" → text` — the same key shape
+coins use. Keeping the words out of the grid is what makes signs safe: the grid is
+still a plain rectangle of characters, so `coinKeysFor`, every row/column number and
+every level that existed before signs are untouched, and a level with no `messages`
+field simply has no signs. `parseLevel(text, messages)` takes them as an optional
+second argument and tidies them (`level.messages`, read with `messageAt`);
+`render.js` collects the signs while drawing tiles and paints them **last**, so a
+tile in the next column can't scribble over the words. The physics has never heard
+of `!` — you run straight through one. In the editor the 💬 tool paints a `!` and
+opens a pop-up to type the words; painting anything else over that square (the
+eraser included) throws the message away too, so the two can never drift apart.
 
 **Spinning.** In the air the cube turns at `CONFIG.SPIN_SPEED` and lines back up
 with the world when it lands. Two different things happen, though: a jump, a pad,
@@ -238,7 +280,8 @@ padded, row indices, `"col,row"` coin keys and stored level strings are unaffect
 | `js/game/render.js` | Drawing a frame: sky, ground, every tile, HUD, and the win/death overlays. |
 | `js/game/player.js` | How a cube *looks*: `drawPlayer`, `normalizeSkin`, `hslToHex`. Shared by the game, the previews and the picker buttons. |
 | `js/game/effects.js` | The trail and the death explosion (`drawTrail`, `spawnExplosion`, `renderParticles`). |
-| `js/ui/editor.js` | The level editor: paint grid, palette, tune/theme buttons, zoom, test-play, copy/paste, save. |
+| `js/ui/editor.js` | The level editor: paint grid, palette, tune/theme buttons, zoom, signs, test-play, copy/paste, save. |
+| `js/ui/scrollbars.js` | Scroll bars you can drag with a finger (the editor's grid). Knows nothing about levels. |
 | `js/ui/skins.js` | The cube editor and its little live-preview cube. |
 | `js/ui/settings.js` | The Control Panel: sliders, colors, switches, "Save/Reset for everyone". |
 | `js/ui/toast.js` | The little "Saved!" pop-up. |
@@ -269,9 +312,10 @@ padded, row indices, `"col,row"` coin keys and stored level strings are unaffect
 **Other:**
 
 - `data/` — runtime state, created/seeded on first run and **gitignored**:
-  - `levels.json` — `{id, name, author, level, song, theme, ownerId, updatedAt}`.
+  - `levels.json` — `{id, name, author, level, song, theme, messages, ownerId, updatedAt}`.
     Array order is the play order (changed via the reorder endpoint). `ownerId` is
-    who may edit it; `null` means admin-only (the built-in levels).
+    who may edit it; `null` means admin-only (the built-in levels). `messages` is
+    the level's signs (`{"col,row": "words"}`) and is missing on older levels.
   - `settings.json` — CONFIG overrides saved "for everyone" (a flat subset).
   - `scores.json` — `{levelId, accountId, player, percent, updatedAt}`: each
     player's **best % completion** per level (100 = finished). One row per
@@ -490,9 +534,13 @@ later, and compared with `timingSafeEqual`. Five wrong guesses locks that name f
 password give the *same* message, so guessing can't discover who exists.
 
 Server-side level validation (`lib/validate.js`, returns clear messages): only the
-characters `. # ^ o * | / \ = - p U s @ > < u n f c h g`, all rows equal length, at most one
-`|`, ≤ 500 columns, ≤ 30 rows. The allowed-character list is defined **once**
-(`LEVEL_CHARS`) and the error message is generated from it, so the two can't drift.
+characters `. # ^ o * | / \ L 7 = - p U s @ ! > < u n f c h g`, all rows equal length,
+at most one `|`, ≤ 500 columns, ≤ 30 rows. The allowed-character list is defined
+**once** (`LEVEL_CHARS`) and the error message is generated from it, so the two
+can't drift. A level's signs go through `cleanMessages`: ≤ 30 of them, ≤ 120
+letters each, keys that really are a square inside this level. Anything odd is
+**dropped, not refused** (like an unknown skin field) — a strange sign should never
+stop a kid saving their level.
 
 Server-side profile validation (`validateProfile`/`cleanSkin`, clear messages):
 `name` 1–20 characters; colors must match `#rrggbb`; `shape`/`face`/`trail`/
@@ -584,6 +632,19 @@ Two automatic checks, both run by `npm test`:
   kill; pads and ramps do nothing; a `u` mid-flight reverses the thrust; a `@`
   inside a flight section respawns you **flying**; after `c` the cube jumps and
   spins again.
+- Ceiling ramps (`L` `7`): after a `u`, the cube runs up an `L` and down a `7`
+  along the roof without dying, and a jump still beats the glue. With gravity
+  normal, `L` and `7` do nothing at all (and still never kill); with gravity
+  flipped, `/` and `\` likewise do nothing.
+- Signs (`!`): the 💬 tool paints a signpost and asks for the words; the sign and
+  its words are drawn in the level and the cube runs straight through them. Save,
+  go back to the menu, re-open for edit → the words are still there. "Copy code"
+  includes a `messages:` line and Import brings the signs back; code copied
+  *before* signs existed still imports fine.
+- The editor by finger: dragging draws a run of blocks (it never pans); both
+  scroll bars appear once the grid overflows and drag smoothly; painting at the
+  edge of the box slides the grid along; 🔍+ zooms in past "the whole level fits"
+  and 🔍− comes back; every palette button shows its name.
 - Jumping right over a `=` or a `-`: the arc reaches its full height instead of
   being snatched down onto the slab, and landing on the slab still works.
 - Running off the edge of a block gives exactly one 90° flip, held until landing;

@@ -66,6 +66,9 @@ export const CONFIG = {
   CATAPULT_COLOR: "#ffd21a",   // the catapult bucket ( U )
   COIN_COLOR: "#ffd700",       // collectible coins
   GROUND_COLOR: "#222252",     // the floor
+  SIGN_COLOR: "#f7f3e3",       // the board a  !  sign is painted on
+  SIGN_TEXT_COLOR: "#20204a",  // the writing on it
+  SIGN_TEXT_SIZE: 16,          // how big the writing is. Bigger = easier to read, but a wider sign
   SKY_TOP: "#1a0533",          // background gradient, top...
   SKY_BOTTOM: "#e6007e",       // ...and bottom. Try swapping them!
 

@@ -11,7 +11,7 @@
 // respawn, all through that view.
 
 import { CONFIG, THEMES } from "../config.js";
-import { tileAt, cellTop, skyTop, groundSpans } from "./level.js";
+import { tileAt, cellTop, skyTop, groundSpans, messageAt } from "./level.js";
 import { drawPlayer } from "./player.js";
 import { drawTrail, renderParticles } from "./effects.js";
 
@@ -30,6 +30,53 @@ function drawLeaderboard(ctx, view, cx, y, levelId) {
     y += 26;
   });
   return y;
+}
+
+/* ----------------------------------------------------------------
+   A SIGN ( ! ) — a little board on a post with a message on it, so a
+   level can tell you what to do ("HOLD to fly up!"). It is only a
+   picture: the physics doesn't know signs exist, so you run straight
+   through one. x,y is the top-left of its square.
+   ---------------------------------------------------------------- */
+const SIGN_LINE_CHARS = 22;      // longer messages wrap onto another line
+
+// Break a message into short lines, never splitting a word in half.
+function signLines(text) {
+  const lines = [];
+  let line = "";
+  for (const word of String(text).split(/\s+/)) {
+    if (!word) continue;
+    if (line && (line + " " + word).length > SIGN_LINE_CHARS) { lines.push(line); line = word; }
+    else line = line ? line + " " + word : word;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function drawSign(ctx, x, y, text) {
+  const T = CONFIG.TILE, size = CONFIG.SIGN_TEXT_SIZE;
+  const lines = signLines(text);
+  ctx.font = "bold " + size + "px Trebuchet MS";
+  ctx.textAlign = "center";
+  // How big does the board have to be to fit the words?
+  let widest = T * 0.7;
+  for (const line of lines) widest = Math.max(widest, ctx.measureText(line).width);
+  const boardW = widest + 18, boardH = lines.length * (size + 4) + 12;
+  const midX = x + T / 2;
+  const boardBottom = y + T * 0.55;                 // the post pokes out below it
+  // the post
+  ctx.fillStyle = CONFIG.SIGN_TEXT_COLOR;
+  ctx.fillRect(midX - 3, boardBottom - 2, 6, T * 0.45 + 2);
+  // the board
+  ctx.fillStyle = CONFIG.SIGN_COLOR;
+  ctx.strokeStyle = CONFIG.SIGN_TEXT_COLOR; ctx.lineWidth = 3;
+  const bx = midX - boardW / 2, by = boardBottom - boardH;
+  if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, boardW, boardH, 8); ctx.fill(); ctx.stroke(); }
+  else { ctx.fillRect(bx, by, boardW, boardH); ctx.strokeRect(bx, by, boardW, boardH); }
+  // the words
+  ctx.fillStyle = CONFIG.SIGN_TEXT_COLOR;
+  lines.forEach((line, i) => ctx.fillText(line, midX, by + 10 + size + i * (size + 4) - 4));
+  ctx.textAlign = "left";
 }
 
 export function draw(view, dt) {
@@ -125,7 +172,8 @@ export function draw(view, dt) {
     else if (!on && runFrom !== null) { drawGroundRun(runFrom, col); runFrom = null; }
   }
 
-  // tiles
+  // tiles (signs are collected as we go and drawn on top at the end)
+  const signs = [];
   for (let col = colStart; col <= colEnd; col++) {
     for (let row = 0; row < S.level.rows; row++) {
       const ch = tileAt(S.level, col, row);
@@ -135,22 +183,28 @@ export function draw(view, dt) {
         ctx.fillStyle = CONFIG.BLOCK_COLOR; ctx.fillRect(x, y, T, T);
         ctx.fillStyle = CONFIG.BLOCK_EDGE; ctx.fillRect(x, y, T, 4);
         ctx.fillStyle = "rgba(0,0,0,.25)"; ctx.fillRect(x, y + T - 5, T, 5);
-      } else if (ch === "/" || ch === "\\") {
+      } else if (ch === "/" || ch === "\\" || ch === "L" || ch === "7") {
         // a ramp: a filled right triangle in the block color, with a white edge
-        // along its slope (like the block's white top edge)
+        // along its slope (like the block's white top edge). The floor ramps
+        // ( / and \ ) are solid BELOW their slope; the ceiling ones ( L and 7 )
+        // are the same triangles turned upside down, solid above.
         ctx.fillStyle = CONFIG.BLOCK_COLOR;
         ctx.beginPath();
-        if (ch === "/") {            // solid below the slope: bottom-left, bottom-right, top-right
-          ctx.moveTo(x, y + T); ctx.lineTo(x + T, y + T); ctx.lineTo(x + T, y);
-        } else {                     // solid below the slope: top-left, bottom-right, bottom-left
-          ctx.moveTo(x, y); ctx.lineTo(x + T, y + T); ctx.lineTo(x, y + T);
-        }
+        if (ch === "/")      { ctx.moveTo(x, y + T); ctx.lineTo(x + T, y + T); ctx.lineTo(x + T, y); }
+        else if (ch === "\\"){ ctx.moveTo(x, y); ctx.lineTo(x + T, y + T); ctx.lineTo(x, y + T); }
+        else if (ch === "L") { ctx.moveTo(x, y); ctx.lineTo(x + T, y); ctx.lineTo(x + T, y + T); }
+        else                 { ctx.moveTo(x, y); ctx.lineTo(x + T, y); ctx.lineTo(x, y + T); }
         ctx.closePath(); ctx.fill();
+        // the white line along the slope — that's the surface you run on
         ctx.strokeStyle = CONFIG.BLOCK_EDGE; ctx.lineWidth = 4;
         ctx.beginPath();
-        if (ch === "/") { ctx.moveTo(x, y + T); ctx.lineTo(x + T, y); }
-        else            { ctx.moveTo(x, y); ctx.lineTo(x + T, y + T); }
+        if (ch === "/" || ch === "7") { ctx.moveTo(x, y + T); ctx.lineTo(x + T, y); }
+        else                          { ctx.moveTo(x, y); ctx.lineTo(x + T, y + T); }
         ctx.stroke();
+      } else if (ch === "!") {
+        // a sign: remember it and draw it AFTER all the tiles, so nothing
+        // in the next column can scribble over the words.
+        signs.push({ x, y, text: messageAt(S.level, col, row) });
       } else if (ch === "^") {
         ctx.fillStyle = CONFIG.SPIKE_COLOR;
         ctx.beginPath(); ctx.moveTo(x + T/2, y + 2); ctx.lineTo(x + T - 3, y + T); ctx.lineTo(x + 3, y + T);
@@ -316,6 +370,9 @@ export function draw(view, dt) {
       }
     }
   }
+
+  // signs — the words the level maker left for you, on top of everything
+  for (const sign of signs) drawSign(ctx, sign.x, sign.y, sign.text);
 
   // checkpoint flags (practice mode) — little green flags you can respawn at
   for (const cp of checkpoints) {

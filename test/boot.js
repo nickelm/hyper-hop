@@ -142,13 +142,15 @@ setGlobal("URL", function () { return { pathname: "/" }; });   // api.js reads t
 process.on("unhandledRejection", () => {});                    // startup fetches fail quietly here
 
 // A level you finish, and a level you die on (so the win AND death screens run).
+// The  !  in the win level is a sign, so the sign drawing really runs too.
 const WIN_LEVEL =
 `....................................................
 .........*..........*...............*...............
 ....................====............................
 ....................................................
-....................................................
+...!................................................
 ......o......p.......U........-......@.........|....`;
+const WIN_MESSAGES = { "3,4": "Jump the spikes and grab the coins!" };
 const DIE_LEVEL = "...................^.......^....###...###....o......^^...##..........|";
 
 (async () => {
@@ -167,9 +169,9 @@ const DIE_LEVEL = "...................^.......^....###...###....o......^^...##..
     catch (e) { problem = problem || (what + "\n" + e.stack); }
   }
 
-  function playFor(what, levelText) {
+  function playFor(what, levelText, messages) {
     check(what, () => {
-      game.startLevel(game.parseLevel(levelText), false, false, 0, 2, 1);
+      game.startLevel(game.parseLevel(levelText, messages), false, false, 0, 2, 1);
       for (let f = 0; f < 800; f++) {
         for (let k = 0; k < 4; k++) game.stepPhysics(game.simState, game.FIXED_DT);
         game.drainSimEvents();
@@ -188,7 +190,7 @@ const DIE_LEVEL = "...................^.......^....###...###....o......^^...##..
     check("the login screen builds", () => game.buildLoginPicker());
     check("the login screen shows", () => game.showLogin());
   } else {
-    playFor("played a level to the finish (HUD, coins, WIN screen)", WIN_LEVEL);
+    playFor("played a level to the finish (HUD, coins, sign, WIN screen)", WIN_LEVEL, WIN_MESSAGES);
     playFor("died on a level (explosion, death screen, respawn)", DIE_LEVEL);
 
     check("the menu builds", () => game.buildMenu([
@@ -205,6 +207,11 @@ const DIE_LEVEL = "...................^.......^....###...###....o......^^...##..
     check("the level editor opens (new level)", () => game.openNewLevel());
     check("the level editor opens (editing a saved level)", () => game.openLevelForEdit(
       { id: 1, name: "L", author: "kid", ownerId: 1, level: "..#..\n..^..|", song: 1, theme: 2 }));
+    // The same again with the newer bits: ceiling ramps, a sign, and the words
+    // that go on it (which live beside the grid, not in it).
+    check("the level editor opens (ceiling ramps and a sign)", () => game.openLevelForEdit(
+      { id: 2, name: "Upside down", author: "kid", ownerId: 1, song: 0, theme: 0,
+        level: "..L7.!\n..u..|", messages: { "5,0": "Mind your head!" } }));
   }
 
   fs.rmSync(TMP, { recursive: true, force: true });

@@ -128,29 +128,41 @@ export function stepPhysics(state, dt) {
   // ---- ramps: sloped ground that only ever pushes you UP, never kills ----
   // We do this BEFORE the block/spike pass so a ramp lifts the cube onto a
   // block stack instead of the block's side killing it.
+  //
+  // There are two families of ramps: the floor ones ( / and \ ) you run up with
+  // normal gravity, and the ceiling ones ( L and 7 ) you run along hanging
+  // upside-down after a  u  gate. Only the family that matches the way gravity
+  // is pointing does anything; the other one is simply not there (and, like
+  // every ramp, never deadly). Multiplying by gravityDir mirrors the whole test,
+  // so there is ONE piece of code for both — not two.
   const wasOnRampUp = player.onRamp === 1;   // remember, so we can launch off the top of a /
   player.onRamp = 0;
-  const jumping = player.vy < 0;             // going up (a jump or pad) always beats the ramp glue
-  // Ramps are ignored while gravity is flipped, and while flying (they simply do
-  // nothing, and still never kill) — see the note in CLAUDE.md.
-  for (let col = c0; !state.flying && state.gravityDir > 0 && col <= c1; col++) {
+  const up = state.gravityDir;               // +1 = normal (up is -y), -1 = flipped (up is +y)
+  const jumping = player.vy * up < 0;        // heading upward (a jump or pad) always beats the ramp glue
+  const rampUp   = up > 0 ? "/"  : "L";      // the ramp that CLIMBS as you run right
+  const rampDown = up > 0 ? "\\" : "7";      // and the one that goes back down
+  // Ramps do nothing at all while flying (a rocket has no feet) — see CLAUDE.md.
+  for (let col = c0; !state.flying && col <= c1; col++) {
     for (let row = 0; row < state.level.rows; row++) {
       const ch = tileAt(state.level, col, row);
-      if (ch !== "/" && ch !== "\\") continue;
+      if (ch !== rampUp && ch !== rampDown) continue;
       const tx = col * T, ty = cellTop(state.level, row);
       // only care when the cube's CENTER is over this ramp column (kind on purpose)
       if (player.x < tx || player.x >= tx + T) continue;
       const f = (player.x - tx) / T;                          // 0 at left edge, 1 at right edge
-      // where the top of the slope is at this x. / rises to the right, \ drops to the right.
-      const surfaceY = ch === "/" ? ty + T - f * T : ty + f * T;
-      const bottom = player.y + half;
-      // stick to the slope: cube sitting on it, sunk below it, or within RAMP_GLUE above it
-      if (!jumping && bottom >= surfaceY - CONFIG.RAMP_GLUE) {
-        player.y = surfaceY - half;
-        if (player.vy > 0) player.vy = 0;
+      // Where the surface you stand on is at this x. The climbing ramps ( / and L )
+      // are mirror images of each other, and so are the two that go down.
+      const surfaceY = (ch === rampUp) === (up > 0) ? ty + T - f * T : ty + f * T;
+      const feet = player.y + half * up;    // the edge of the cube gravity is pulling toward
+      // stick to the slope: cube sitting on it, sunk into it, or within RAMP_GLUE of it
+      const stuck = up > 0 ? feet >= surfaceY - CONFIG.RAMP_GLUE
+                           : feet <= surfaceY + CONFIG.RAMP_GLUE;
+      if (!jumping && stuck) {
+        player.y = surfaceY - half * up;
+        if (player.vy * up > 0) player.vy = 0;
         player.onGround = true;
-        player.onRamp = ch === "/" ? 1 : -1;
-        player.rot = player.onRamp === 1 ? -45 : 45;          // tilt the cube to match the slope
+        player.onRamp = ch === rampUp ? 1 : -1;
+        player.rot = (player.onRamp === 1 ? -45 : 45) * up;   // tilt the cube to match the slope
       }
     }
   }
@@ -273,8 +285,8 @@ export function stepPhysics(state, dt) {
   // Ran off the TOP of a  /  into open air? Give a little upward pop.
   // (We check this AFTER the tile pass so walking straight onto a block or the
   // floor — where onGround is now true — does NOT pop you. 0 = disabled.)
-  if (!state.flying && wasOnRampUp && !player.onGround && player.vy >= 0) {
-    player.vy = -CONFIG.RAMP_LAUNCH * CONFIG.SCROLL_SPEED;
+  if (!state.flying && wasOnRampUp && !player.onGround && player.vy * up >= 0) {
+    player.vy = -CONFIG.RAMP_LAUNCH * CONFIG.SCROLL_SPEED * up;
   }
 
   // Just walked off the edge of a block? That's one tidy quarter-turn, not a

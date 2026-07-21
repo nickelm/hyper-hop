@@ -13,10 +13,14 @@
 // The ONE list of tiles a level is allowed to use. Everything that
 // checks or describes level tiles reads from this, so there is a
 // single source of truth.
-const LEVEL_CHARS = new Set([".", "#", "^", "o", "*", "|", "/", "\\", "=", "-", "p", "U", "s", "@", ">", "<", "u", "n", "f", "c", "h", "g"]);
+const LEVEL_CHARS = new Set([".", "#", "^", "o", "*", "|", "/", "\\", "L", "7", "=", "-", "p", "U", "s", "@", "!", ">", "<", "u", "n", "f", "c", "h", "g"]);
 const LEVEL_CHARS_HELP = [...LEVEL_CHARS].join(" ");   // "‎. # ^ o * | / \ = - ..." for error messages
 const MAX_COLS = 500;
 const MAX_ROWS = 30;
+// A level's signs: what each  !  square says. The words are kept BESIDE the
+// grid (see cleanMessages), so the grid stays a plain rectangle of letters.
+const MAX_MESSAGES = 30;
+const MAX_MESSAGE = 120;
 
 // ---------- Rules for a valid cube skin (looks only, never physics) ----------
 // A skin is a little bundle of choices about how a player's cube LOOKS.
@@ -53,6 +57,7 @@ const KNOWN_SETTING_KEYS = new Set([
   "PLAYER_COLOR", "PLAYER_EYE_COLOR", "BLOCK_COLOR", "BLOCK_EDGE",
   "SPIKE_COLOR", "PAD_COLOR", "SMALL_PAD_COLOR", "CATAPULT_COLOR",
   "COIN_COLOR", "COIN_SILVER_COLOR", "GROUND_COLOR",
+  "SIGN_COLOR", "SIGN_TEXT_COLOR", "SIGN_TEXT_SIZE",
   "SKY_TOP", "SKY_BOTTOM",
   "PARTICLES_ON_DEATH", "TRAIL", "SCREEN_SHAKE",
   "SOUND", "MUSIC", "MUSIC_VOLUME", "MUSIC_BPM", "BEAT_PULSE",
@@ -96,6 +101,34 @@ function coinKeysFor(levelText) {
   return keys;
 }
 
+/* ----------------------------------------------------------------
+   THE SIGNS a level carries: { "12,9": "HOLD to fly up!" } — which
+   square the signpost is on, and what it says.
+
+   Anything strange (a number instead of words, a key that isn't a
+   square, a sign hanging off the edge of the level) is quietly
+   DROPPED rather than refused, the same way an unknown skin field is:
+   an odd sign should never stop a kid saving their level. Only the
+   two limits below are hard, and they're generous.
+   ---------------------------------------------------------------- */
+function cleanMessages(raw, cols, rows) {
+  const out = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  let kept = 0;
+  for (const [key, text] of Object.entries(raw)) {
+    if (kept >= MAX_MESSAGES) break;
+    if (!/^\d+,\d+$/.test(key)) continue;
+    const [col, row] = key.split(",").map(Number);
+    if (col >= cols || row >= rows) continue;        // not a square in this level
+    if (typeof text !== "string") continue;
+    const words = text.trim().slice(0, MAX_MESSAGE);
+    if (!words) continue;
+    out[key] = words;
+    kept++;
+  }
+  return out;
+}
+
 // Check that a level is drawn with legal tiles and is not silly-huge.
 // Returns the cleaned-up {name, author, level, song, theme}, or throws
 // an Error with a message we are happy to show the kids.
@@ -133,6 +166,7 @@ function validateLevel(body) {
     level,
     song,
     theme,
+    messages: cleanMessages(body.messages, width, rows.length),
   };
 }
 
@@ -259,5 +293,5 @@ function validateAccountEdit(body) {
 module.exports = {
   LEVEL_CHARS, MAX_COLS, MAX_ROWS, DEFAULT_SKIN, MAX_NAME, KNOWN_SETTING_KEYS,
   normalizeLevel, validateLevel, validateSettings, validateScore,
-  countEmoji, cleanSkin, coinKeysFor, validateName, validateAccountEdit,
+  countEmoji, cleanSkin, cleanMessages, coinKeysFor, validateName, validateAccountEdit,
 };

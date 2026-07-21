@@ -434,7 +434,7 @@ function afterWin() {
 function startLevelByIndex(i) {
   const L = serverLevels[i];
   if (!L) { leaveGame(); return; }
-  startLevel(parseLevel(L.level), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id);
+  startLevel(parseLevel(L.level, L.messages), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id);
 }
 
 // "Play All": start at the first level and roll through them all in order.
@@ -542,7 +542,7 @@ function buildMenu(levels) {
     const title = (i + 1) + ". " + L.name + (L.author ? "  — " + L.author : "");
     play.innerHTML = '<div>' + escapeHtml(title) + '</div>' +
       '<div class="levelScore">' + scoreLine(L.id) + '</div>';
-    play.onclick = () => { S.campaign = false; startLevel(parseLevel(L.level), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id); };
+    play.onclick = () => { S.campaign = false; startLevel(parseLevel(L.level, L.messages), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id); };
     // ...a little 📊 opens the full leaderboard for this level...
     const board = document.createElement("button");
     board.className = "btn small"; board.textContent = "📊"; board.title = "High scores";

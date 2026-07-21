@@ -17,6 +17,9 @@ import { CONFIG } from "../config.js";
      .  empty air
      #  solid block (stand on top; hitting the side = death)
      /  up-ramp     \  down-ramp     (sloped ground, never deadly)
+     L  up-ramp     7  down-ramp     (the same, for the CEILING: they only
+                                      work while gravity is flipped)
+     !  sign        (a message for the player; the words live in level.messages)
      ^  spike        s  saw blade    (both deadly)
      o  bounce pad   p  small pad     U  catapult   (launch you up)
      *  coin          @  checkpoint   |  finish line
@@ -35,11 +38,44 @@ import { CONFIG } from "../config.js";
 // Turn a level's text into a map: a grid of rows, plus how many
 // columns and rows it has. Blank lines are dropped and short rows
 // are padded with empty air so every row is the same width.
-export function parseLevel(text) {
+//
+// `messages` is the level's signs (see below) — leave it out and the
+// level simply has none, which is what every older level does.
+export function parseLevel(text, messages) {
   const rows = text.split("\n").map(r => r.replace(/\r/g, "")).filter(r => r.trim().length > 0);
   const width = Math.max(...rows.map(r => r.length));
   const grid = rows.map(r => r.padEnd(width, "."));
-  return { grid, cols: width, rows: grid.length };
+  return { grid, cols: width, rows: grid.length, messages: cleanMessages(messages) };
+}
+
+/* ----------------------------------------------------------------
+   SIGNS. A  !  in the grid is a signpost; the WORDS on it are kept
+   beside the grid, in a little list of "column,row" → what it says:
+
+     { "12,9": "HOLD to fly up!" }
+
+   Keeping the words out of the grid is what makes signs safe to add:
+   the grid is still a plain rectangle of letters, so every level that
+   existed before signs did reads exactly the same.
+
+   Anything odd (a number instead of words, a key that isn't a square)
+   is quietly dropped, so a broken sign can never stop the game.
+   ---------------------------------------------------------------- */
+function cleanMessages(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [key, text] of Object.entries(raw)) {
+    if (!/^\d+,\d+$/.test(key)) continue;
+    if (typeof text !== "string") continue;
+    const words = text.trim();
+    if (words) out[key] = words;
+  }
+  return out;
+}
+
+// What does the sign at this square say? "" if there isn't one.
+export function messageAt(level, col, row) {
+  return (level.messages && level.messages[col + "," + row]) || "";
 }
 
 // What tile is at this square? Anything off the edge of the map counts
