@@ -1,5 +1,5 @@
 {
-  "fixture": "ground-hole",
+  "fixture": "ground-hole-refilled",
   "steps": 2400,
   "sampleEvery": 8,
   "samples": [

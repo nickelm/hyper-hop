@@ -164,8 +164,29 @@ Ground gates (`h` `g`) are full-column gates too, and absolute like the rest.
 at y = 0, and under flipped gravity the roof of the world. An `h` switches that
 surface off; a `g` builds it back. This applies to **everyone**, a running cube as
 much as a rocket: with no ground there is simply nothing to stand on, so you drop
-through and, once you are fully past where the ground would have been, you have
-fallen out of the world and die.
+through.
+
+**A hole is a real hole: you fall into it in plain sight.** Dropping past where the
+floor would have been does not kill you — **leaving the bottom of the screen does**.
+That death line is `worldBottom(level)` in `js/game/level.js`, the other end of the
+world from `skyTop`: the camera puts the floor line `CONFIG.CAMERA_FLOOR_Y` of the
+way down the screen and squeezes the whole sky into the part above it, so the strip
+below the floor is always the same slice of the sky's height — the screen's own size
+cancels out, which is what lets the **pure** physics work the line out for itself.
+For a normal 14-row sky that is a little under four squares of falling room, and it
+means a rocket can dive into a pit and climb back out. Upside-down there is no extra
+room: the roof of the world already **is** the top of the screen (that is what the
+camera's zoom is defined to make true), so a roof hole kills exactly at the roof, as
+it always did. One rule either way: **you die when you leave the screen.**
+
+Two things about that test are load-bearing. It does **not** ask whether the ground
+is switched on — with the ground on you could never have got down there anyway, and
+a `g` putting the floor back over your head once you are below it must not save you
+(without this, a cube that fell into a short `h`…`g` pit fell forever and never
+died). And the ground only ever catches you **from above**: the landing tests ask
+"were we not already right past it a step ago?", the same rule the jump-through
+platforms use, so a `g` can never scoop up a cube that has already fallen past.
+`test/golden/ground-hole-refilled.json` is the trace that keeps that honest.
 
 The *other* side of the world is not ground and is unaffected by `h`/`g`: it stays
 a soft wall while flying (so a rocket can never shoot out through the top), and in
@@ -267,6 +288,24 @@ a block stack lets the cube run up onto the stack instead of dying on its side. 
 stored JSON and in the server's seed levels, a down-ramp `\` must be written as
 `\\` so a literal backslash survives encoding.
 
+**A ramp is ground you come down ONTO — from underneath it isn't there at all.**
+That is the same one-way rule `=` and `-` platforms follow, and it is what lets a
+level have a high road and a low road: a ramp floating above the floor is
+something you run *under*, and jumping up into one passes straight through
+instead of snatching you onto it. To get on it you land on the slope from above.
+The test is in the ramp pass in `physics.js`: as well as "are my feet at or below
+the slope now?" (`stuck`) it asks "were my feet at or above the slope where I was
+standing one step ago?" (`fromAbove`). The second half has to be worked out at the
+*previous* x, because a cube riding a slope is snapped exactly onto it every step
+— comparing against the slope under its *current* x would let go of every cube
+running up a `/`. It costs nothing at speed: landing from a great height still
+catches, because you were above the slope a step ago however fast you fell.
+Two things follow. A `\` (or a `7`) met head-on at its **tall** end no longer
+lifts you a whole square: you keep running and the slope picks you up near the
+end, where it comes down to meet you. And with the ground switched off (`h`) a
+ramp in the bottom row no longer catches a falling cube — you drop through the
+hole like you should.
+
 **A block right next door to a ramp never kills you from the side** — that is
 `rampBeside()` in `physics.js`, and it is not a nicety, it is what makes ramps
 work at all. A ramp's slope is *lower* than the top of the block it climbs to, so
@@ -277,7 +316,10 @@ standing in that same corner, and the block used to kill you for it. So the bloc
 pass asks two questions now: "is a ramp holding me?" *and* "am I over a ramp square
 right beside this block, in the same row?". Same row, next door only: a block one
 row **higher** than the ramp's top is a real wall, and running into that still ends
-the run. `test/golden/ramp-jump.json` is the trace that keeps this honest.
+the run. And the shield only covers you while you are on the ramp's own side of
+it: if you are on the low road running *under* a raised ramp, no ramp is holding
+you up, so the block beside it is a plain wall and hitting it ends the run.
+`test/golden/ramp-jump.json` is the trace that keeps this honest.
 
 Ceiling ramps (`L` `7`) are those same two ramps turned upside down, for running
 along the roof after a `u` gate: `L` is the mirror of `/` (it climbs as you go
@@ -396,7 +438,7 @@ able to bend means adding it to BOTH** `LEVEL_RULES` (client) and
 | `js/api.js` | Every `fetch`: `apiGet`, `apiWrite` (family PIN + one retry), `apiPost` (scores, no PIN). Owns the PIN and the PIN / "are you sure?" pop-ups. |
 | `js/input.js` | Taps and keys → actions: jump, hold-to-keep-jumping, reporting held-ness (`setHolding`, for flight), Escape, Z/X checkpoints, in-game buttons. |
 | `js/music.js` | The chiptune synth (`Music`) and the `SONGS` list. |
-| `js/game/level.js` | The level format: `parseLevel`, the tile legend, and the `tileAt` / `cellTop` / `skyTop` / `groundSpans` lookups. |
+| `js/game/level.js` | The level format: `parseLevel`, the tile legend, and the `tileAt` / `cellTop` / `skyTop` / `worldBottom` / `groundSpans` lookups. |
 | `js/game/physics.js` | **Pure.** The rules of the world at a fixed 240 Hz: `stepPhysics(state, dt)`, `requestJump(state)`. No DOM, canvas, sound or fetch. |
 | `js/game/render.js` | Drawing a frame: sky, ground, every tile, HUD, and the win/death overlays. |
 | `js/game/player.js` | How a cube *looks*: `drawPlayer`, `normalizeSkin`, `hslToHex`. Shared by the game, the previews and the picker buttons. |
@@ -461,13 +503,16 @@ able to bend means adding it to BOTH** `LEVEL_RULES` (client) and
 ### How the pieces talk
 
 Physics runs at a fixed 240 Hz (`FIXED_DT`), decoupled from drawing, so all tablets
-play identically. One full-screen canvas; the camera puts the floor at 78% of screen
-height and then **zooms the world so the whole sky fits above it** — one scale
-factor, `zoom = floorY / -skyTop(level)`, applied as a single canvas transform
-around the world layer so tiles, outlines, glyphs and particles all scale
-together. There is no camera Y and no follow/smoothing state to reset. World
-coordinates: floor at y = 0, up is negative y. The HUD and the overlays are drawn
-after that transform is popped, so they are never zoomed or shaken.
+play identically. One full-screen canvas; the camera puts the floor at
+`CONFIG.CAMERA_FLOOR_Y` of the screen height (0.78) and then **zooms the world so
+the whole sky fits above it** — one scale factor, `zoom = floorY / -skyTop(level)`,
+applied as a single canvas transform around the world layer so tiles, outlines,
+glyphs and particles all scale together. There is no camera Y and no
+follow/smoothing state to reset. World coordinates: floor at y = 0, up is negative
+y. The HUD and the overlays are drawn after that transform is popped, so they are
+never zoomed or shaken. The strip of screen *below* the floor is `worldBottom(level)`
+deep — the room you have to fall through a hole (see Ground gates), and the one
+place the physics knows anything about the shape of the screen.
 
 Sideways, the camera is worked out **from the cube**, not from `camX`:
 `camLeft = player.x - W * CONFIG.CAMERA_X / zoom` is the world x at the left edge
@@ -816,6 +861,10 @@ Two automatic checks, both run by `npm test`:
   cube falls through it and dies; a rocket can fly over the gap; a `g` brings the
   ground back and you can land on it. Upside-down (after a `u`) an `h` takes the
   ROOF away instead and you fall upward out of the world.
+- Falling into a hole: the cube drops a good way **below** the floor line, in plain
+  sight, and only dies as it leaves the bottom of the screen. A narrow `h`…`g` pit
+  still kills — the ground coming back over your head does not scoop you up. A
+  rocket can dive into the pit and climb back out alive.
 - Flying (`f` … `c`): holding climbs and letting go drops; the cube scrapes the
   floor, the roof, and the top and underside of a `#` block without dying (and
   cannot jump off a block it is resting on); spikes, saws and block *sides* still
@@ -834,6 +883,13 @@ Two automatic checks, both run by `npm test`:
   including right at the very top, where the cube is already inside the first
   block. The same going off the far end down a `\`, and on `L`/`7` after a `u`.
   A ramp into a block stack **one row higher** still kills, as it always has.
+- Running **under** a ramp: put a `/` and a `\` two rows above open ground → the
+  cube runs straight under them, and jumping up into one passes through instead
+  of being snatched on top. Jump *over* one and land on the slope → it carries
+  you up as usual. A `#` beside a raised ramp still kills if you jump up into it
+  from the low road. After a `u`, an `L`/`7` hanging a square below the roof is
+  run past the same way, while ones flush with the roof are still ridden. And a
+  `\` on flat ground met head-on no longer lifts you a whole square.
 - Signs (`!`): the 💬 tool paints a signpost and asks for the words; the sign and
   its words are drawn in the level and the cube runs straight through them. Save,
   go back to the menu, re-open for edit → the words are still there. "Copy code"

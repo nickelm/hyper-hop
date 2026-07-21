@@ -11,7 +11,7 @@
 // respawn, all through that view.
 
 import { CONFIG, THEMES } from "../config.js";
-import { tileAt, cellTop, skyTop, groundSpans, messageAt } from "./level.js";
+import { tileAt, cellTop, skyTop, worldBottom, groundSpans, messageAt } from "./level.js";
 import { drawPlayer } from "./player.js";
 import { drawTrail, renderParticles } from "./effects.js";
 
@@ -109,7 +109,7 @@ export function draw(view, dt) {
   // camera: the floor sits at 78% of the screen height, same as always. Above it
   // we squeeze the whole sky in, so a tall level always fits on the screen —
   // on a big tablet or a little phone. That squeeze is the `zoom`.
-  const floorY = H * 0.78;
+  const floorY = H * CONFIG.CAMERA_FLOOR_Y;
   const zoom = floorY / -skyTop(S.level);
   let shakeX = 0, shakeY = 0;
   if (view.shake > 0.5) { shakeX = (Math.random()-0.5) * view.shake; shakeY = (Math.random()-0.5) * view.shake; view.shake *= 0.9; }
@@ -153,7 +153,7 @@ export function draw(view, dt) {
     if (col >= S.level.cols) return groundOn[S.level.cols - 1];   // and on past the end
     return groundOn[col];
   };
-  const groundDepth = (H - floorY) / zoom;          // how far down to fill, in world sizes
+  const groundDepth = worldBottom(S.level);         // fill right down to the bottom of the screen
   const drawGroundRun = (from, to) => {             // columns [from, to)
     const x = sx(from * T), w = (to - from) * T;
     ctx.fillStyle = groundColor; ctx.fillRect(x, 0, w, groundDepth);

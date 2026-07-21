@@ -102,6 +102,17 @@ export function skyTop(level) {
   return -Math.max(level.rows, CONFIG.LEVEL_ROWS) * CONFIG.TILE;
 }
 
+// The bottom of the SCREEN — the other end of the world from skyTop. The camera
+// puts the floor line CONFIG.CAMERA_FLOOR_Y of the way down the screen and then
+// squeezes the whole sky into the part above it, so the strip of screen BELOW
+// the floor is always the same slice of the sky's height, on a big tablet and a
+// little phone alike. That strip is the room you have to fall through a hole
+// ( h ) before you have really left the world.
+export function worldBottom(level) {
+  const sky = -skyTop(level);            // how tall the sky is
+  return sky * (1 - CONFIG.CAMERA_FLOOR_Y) / CONFIG.CAMERA_FLOOR_Y;
+}
+
 /* ----------------------------------------------------------------
    WHERE IS THE GROUND SWITCHED ON? An  h  gate opens a hole (no
    ground at all from there on) and a  g  gate builds it back. The

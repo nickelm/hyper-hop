@@ -29,6 +29,10 @@ export const CONFIG = {
   CAMERA_X: 0.33,         // where the cube sits across the screen.
                           // 0 = squashed against the left edge, 0.5 = right in the middle.
                           // Smaller = you see further ahead; bigger = more room behind you
+  CAMERA_FLOOR_Y: 0.78,   // how far down the screen the floor line sits.
+                          // The strip BELOW it is the room you have to fall through
+                          // a hole ( h ) before you're really gone. 0.9 = a shallow
+                          // hole, 0.6 = a long drop (and a smaller-looking world)
 
   // ---------- RAMPS (the slopes  /  and  \  ) ----------
   RAMP_LAUNCH: 0.6,       // running off the top of a  /  ramp pops you up. Bigger = higher pop. 0 = no pop

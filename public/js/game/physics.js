@@ -20,7 +20,7 @@
 // makes a flying cube climb.
 
 import { CONFIG } from "../config.js";
-import { tileAt, cellTop, skyTop } from "./level.js";
+import { tileAt, cellTop, skyTop, worldBottom } from "./level.js";
 
 // The physics runs at a fixed 240 steps a second, no matter how fast
 // the screen draws, so the game feels exactly the same on every tablet.
@@ -33,6 +33,7 @@ export function stepPhysics(state, dt) {
   const T = CONFIG.TILE, half = CONFIG.PLAYER_SIZE / 2;
 
   const prevX = player.x;                    // remember where we were, for portal crossings
+  const prevY = player.y;                    // ...and how high, so the ground can't grab us from below
   const wasOnGround = player.onGround;       // ...and whether we had our feet down, for the flip
   player.x += CONFIG.SCROLL_SPEED * state.speedMult * dt;
   state.camX += CONFIG.SCROLL_SPEED * state.speedMult * dt;
@@ -98,29 +99,42 @@ export function stepPhysics(state, dt) {
   const floorSolid = state.groundOn || !groundIsFloor;  // the floor is "ground" only when gravity is normal
   const roofSolid  = state.groundOn ||  groundIsFloor;  // upside-down, the roof is the ground instead
 
+  // You can land ON a surface, but you can never come back UP through it — the
+  // same rule as the jump-through platforms ( = ). Once you have dropped RIGHT
+  // past where the ground is, it can't catch you any more. This only ever
+  // matters over a hole: it is what stops a  g  gate from scooping up a cube
+  // that has already fallen past where the ground is about to come back.
+  const notPastFloor = prevY - half <= 0;
+  const notPastRoof  = prevY + half >= yCeil;
+
   // While FLYING both surfaces are soft walls: you slide along them and stop,
   // you never die on them, and you never "land" (so tapping can't become a jump).
   if (state.flying) {
-    if (floorSolid && player.y + half >= 0)     { player.y = -half;       if (player.vy > 0) player.vy = 0; }
-    if (roofSolid  && player.y - half <= yCeil) { player.y = yCeil + half; if (player.vy < 0) player.vy = 0; }
+    if (floorSolid && notPastFloor && player.y + half >= 0)     { player.y = -half;       if (player.vy > 0) player.vy = 0; }
+    if (roofSolid  && notPastRoof  && player.y - half <= yCeil) { player.y = yCeil + half; if (player.vy < 0) player.vy = 0; }
   } else if (groundIsFloor) {
-    if (floorSolid && player.y + half >= 0) {
+    if (floorSolid && notPastFloor && player.y + half >= 0) {
       player.y = -half; player.vy = 0; player.onGround = true;
       landRotation(player);
     }
   } else {
-    if (roofSolid && player.y - half <= yCeil) {
+    if (roofSolid && notPastRoof && player.y - half <= yCeil) {
       player.y = yCeil + half; player.vy = 0; player.onGround = true;
       landRotation(player);
     }
   }
 
-  // Nothing under you at all? Once you've dropped right past where the ground
-  // would have been, you've fallen out of the world — and that's the end.
-  if (!state.groundOn) {
-    const fellOut = groundIsFloor ? (player.y - half > 0) : (player.y + half < yCeil);
-    if (fellOut) die(state);
-  }
+  // Fallen off the BOTTOM OF THE SCREEN? Then you have left the world, and that's
+  // the end. A hole ( h ) is a real hole: you drop right past where the floor
+  // would have been, in plain sight, and only leaving the screen kills you. Note
+  // there is no "is the ground off?" test here on purpose — with the ground on you
+  // could never have got down there anyway, and a  g  putting the floor back over
+  // your head once you are below it does not save you. (Upside-down, the roof of
+  // the world already IS the top of the screen, so up there it is the very same
+  // rule with no extra room to spare.)
+  const fellOut = groundIsFloor ? (player.y - half > worldBottom(state.level))
+                                : (player.y + half < yCeil);
+  if (fellOut) die(state);
 
   // columns near the player (used by both the ramp pass and the tile pass)
   const c0 = Math.floor((player.x - half) / T) - 1, c1 = Math.floor((player.x + half) / T) + 1;
@@ -149,15 +163,28 @@ export function stepPhysics(state, dt) {
       const tx = col * T, ty = cellTop(state.level, row);
       // only care when the cube's CENTER is over this ramp column (kind on purpose)
       if (player.x < tx || player.x >= tx + T) continue;
-      const f = (player.x - tx) / T;                          // 0 at left edge, 1 at right edge
-      // Where the surface you stand on is at this x. The climbing ramps ( / and L )
-      // are mirror images of each other, and so are the two that go down.
-      const surfaceY = (ch === rampUp) === (up > 0) ? ty + T - f * T : ty + f * T;
+      // Where the slope is, a fraction f of the way across this square (0 at the
+      // left edge, 1 at the right). The climbing ramps ( / and L ) are mirror
+      // images of each other, and so are the two that go down.
+      const climbs = (ch === rampUp) === (up > 0);
+      const slopeAt = (f) => climbs ? ty + T - f * T : ty + f * T;
+      const surfaceY = slopeAt((player.x - tx) / T);
       const feet = player.y + half * up;    // the edge of the cube gravity is pulling toward
+      // Where those feet were, and where the slope was under them, one step ago.
+      const prevFeet = feet - player.vy * dt;
+      const wasSurfaceY = slopeAt(Math.max(0, Math.min(1, (prevX - tx) / T)));
+      // A ramp is GROUND, and you only ever meet ground from above. If our feet
+      // were already below the slope a moment ago then we are running UNDERNEATH
+      // this ramp — and a ramp you are under simply isn't there, so you run
+      // straight past it. That's what lets a level have a high road and a low
+      // road. (Running up a ramp, or sliding down one, our feet were sitting
+      // right ON the slope a moment ago, so those still count as "from above".)
+      const fromAbove = up > 0 ? prevFeet <= wasSurfaceY + CONFIG.RAMP_GLUE
+                               : prevFeet >= wasSurfaceY - CONFIG.RAMP_GLUE;
       // stick to the slope: cube sitting on it, sunk into it, or within RAMP_GLUE of it
       const stuck = up > 0 ? feet >= surfaceY - CONFIG.RAMP_GLUE
                            : feet <= surfaceY + CONFIG.RAMP_GLUE;
-      if (!jumping && stuck) {
+      if (!jumping && stuck && fromAbove) {
         player.y = surfaceY - half * up;
         if (player.vy * up > 0) player.vy = 0;
         player.onGround = true;
@@ -347,17 +374,22 @@ function landRotation(player) {
 // ( / \ normally, L 7 upside-down), just like the ramp pass above.
 //
 // It must be the SAME ROW, right next door: a block one row HIGHER is a real
-// wall, and running into that still ends the run.
+// wall, and running into that still ends the run. And we must be on the ramp's
+// own side of it, not running along underneath — a ramp we are under isn't
+// holding us up, so that block really is a wall.
 function rampBeside(state, col, row) {
   const T = CONFIG.TILE, half = CONFIG.PLAYER_SIZE / 2, x = state.player.x;
   const up = state.gravityDir;
   const rampUp   = up > 0 ? "/"  : "L";
   const rampDown = up > 0 ? "\\" : "7";
+  const feet = state.player.y + half * up;
   for (const c of [col - 1, col + 1]) {          // the square before and after the block
     const ch = tileAt(state.level, c, row);
     if (ch !== rampUp && ch !== rampDown) continue;
-    const tx = c * T;
-    if (x + half > tx && x - half < tx + T) return true;   // we're over that ramp
+    const tx = c * T, ty = cellTop(state.level, row);
+    if (x + half <= tx || x - half >= tx + T) continue;      // not over that ramp at all
+    const farEdge = up > 0 ? ty + T : ty;   // the bottom of the ramp square (its top, upside-down)
+    if ((feet - farEdge) * up <= CONFIG.RAMP_GLUE) return true;   // we're on it, not under it
   }
   return false;
 }
