@@ -17,7 +17,7 @@ import { normalizeSkin, drawPlayer } from "./game/player.js";
 import { spawnExplosion } from "./game/effects.js";
 import { draw } from "./game/render.js";
 import { Music, SONGS } from "./music.js";
-import { apiGet, apiWrite, apiPost, apiDelete, askConfirm } from "./api.js";
+import { apiGet, apiPost } from "./api.js";
 import { initInput } from "./input.js";
 import { applyLevelRules, clearLevelRules } from "./rules.js";
 import { showToast } from "./ui/toast.js";
@@ -26,13 +26,21 @@ import { initSettings, isPanelOpen, openPanel, closePanel } from "./ui/settings.
 import { initSkins, openSkinEditor } from "./ui/skins.js";
 import { initEditor, openLevelForEdit, openNewLevel, layoutEditor, backToEditor } from "./ui/editor.js";
 import {
+  initMenu, buildMenu, refreshLevels, setLevels, showTab, levels as menuLevels,
+  listedLevels, levelById, escapeHtml,
+} from "./ui/menu.js";
+import {
+  initAdventures, openAdventures, nextInAdventure,
+} from "./ui/adventures.js";
+import {
   initLogin, showLogin, buildLoginPicker, loadAccounts, logout,
   currentAccount, setCurrentAccount, may,
 } from "./ui/login.js";
 import {
-  initEconomy, setWalletFromMe, loadPrices, balance, earnedTotal,
-  alreadyEarned, reportRun, ownLook,
+  initEconomy, setWalletFromMe, setBalance, loadPrices, balance, earnedTotal,
+  alreadyEarned, reportRun,
 } from "./economy.js";
+import { loadWords } from "./names.js";
 
 
 /* ================================================================
@@ -120,7 +128,7 @@ const sfx = {
 };
 
 // ---------------- Game state ----------------
-const S = { screen: "menu", level: null, levelId: null, testMode: false, paused: false, practice: false, songIndex: 0, themeIndex: 0, campaign: false, campaignIndex: 0, reward: null };
+const S = { screen: "menu", level: null, levelId: null, testMode: false, paused: false, practice: false, songIndex: 0, themeIndex: 0, campaign: false, campaignIndex: 0, reward: null, adventureId: null };
 let player, camX, attempts, particles, trail, coinsGot, totalCoins, shake, winT, deadT;
 let runPercent = 0;      // how far you got this run (0..100), shown on the death/win screen
 let runWasBest = false;  // did this run beat your old best on this level? (for the "NEW BEST!" flash)
@@ -134,6 +142,10 @@ let beatPulse = 0;      // 0..1, jumps to 1 on the beat then fades (for the beat
 // is the look we just won, if this level had one to give.
 let runCoinsEarned = 0;
 let runUnlocked = null;
+let runBounty = 0;      // coins from a prize somebody put on this level, if we just won one
+// "We've told the server we finished." An adventure waits for this before
+// asking which level is unlocked next.
+let runReport = null;
 let bridgeFades = {};   // "col,row" -> how visible a  -  bridge still is (1 = solid, 0 = gone). Cosmetic only.
 let squash = 0;         // brief squash-and-stretch on the cube after a catapult launch (1 = full, 0 = none). Cosmetic.
 let tileCheckpoint = null;         // the last  @  checkpoint you touched (a respawn snapshot), or null
@@ -150,11 +162,13 @@ let holding = false;               // is a finger (or the space bar) held down? 
 Music.onStep = (i) => { if (CONFIG.BEAT_PULSE && i % 2 === 0) beatPulse = 1; };
 
 // `extras` is the rest of what a level carries beyond its grid: the cube it
-// makes you wear (`reward`) and the numbers it changes while you're inside it
-// (`rules`). They go in one little bundle rather than as two more arguments on
-// the end, so this line stays readable as levels learn new tricks.
+// makes you wear (`reward`), the numbers it changes while you're inside it
+// (`rules`), and which adventure you're playing it as part of, if any
+// (`adventureId`). They go in one little bundle rather than as more arguments
+// on the end, so this line stays readable as levels learn new tricks.
 function startLevel(parsed, isTest, practice, songIndex, themeIndex, levelId, extras) {
-  const { reward = null, rules = null } = extras || {};
+  const { reward = null, rules = null, adventureId = null } = extras || {};
+  S.adventureId = adventureId;    // so finishing counts toward that adventure
   S.level = parsed; S.testMode = !!isTest; S.screen = "game";
   S.paused = false;
   S.practice = !!practice;
@@ -183,6 +197,8 @@ function resetRun() {
   runPercent = 0; runWasBest = false;
   runCoinsEarned = 0;                  // nothing earned yet this run
   runUnlocked = null;                  // and no look won yet either
+  runBounty = 0;                       // and no prize claimed
+  runReport = null;                    // and nothing reported to the server yet
   coinsGot = new Set();
   bridgeFades = {};                    // every  -  bridge is solid again at the start of a run
   squash = 0;                          // no leftover catapult stretch
@@ -311,6 +327,7 @@ const gameView = {
   get alreadyEarned() { return alreadyEarned(S.levelId); },
   get runCoinsEarned() { return runCoinsEarned; },
   get runUnlocked() { return runUnlocked; },
+  get runBounty() { return runBounty; },
   get S() { return S; },
   get shake() { return shake; }, set shake(v) { shake = v; },
   get beatPulse() { return beatPulse; }, set beatPulse(v) { beatPulse = v; },
@@ -344,14 +361,20 @@ function drainSimEvents() {
       // worth (coins only ever pay once) and tells us what it paid, so
       // the win screen can shout about it. Finishing a level that has a
       // look of its own also wins that cube — the server says so here.
-      reportRun(S.levelId, coinsGot, true).then(({ credited, unlocked }) => {
-        runCoinsEarned = credited;
-        runUnlocked = unlocked;
-        if (credited > 0 || unlocked) updateMenuBar();
-        // The win screen says it too, but in "Play All" we may already be
-        // off to the next level — the toast follows you there.
-        if (unlocked) showToast("New look: " + unlocked.name + "! 🎭");
-      });
+      // Keep hold of this promise: an adventure must not ask "what's
+      // next?" until the server has been told we finished this one, or
+      // it would send us straight back into the level we just beat.
+      runReport = reportRun(S.levelId, coinsGot, true, S.adventureId)
+        .then(({ credited, unlocked, bounty }) => {
+          runCoinsEarned = credited;
+          runUnlocked = unlocked;
+          runBounty = bounty;
+          if (credited > 0 || unlocked || bounty > 0) updateMenuBar();
+          // The win screen says these too, but in "Play All" or an adventure
+          // we may already be off to the next level — the toast follows you.
+          if (unlocked) showToast("New look: " + unlocked.name + "! 🎭");
+          if (bounty > 0) showToast("Bounty claimed: +" + bounty + "! 💰");
+        });
     }
   }
   simState.events.length = 0;
@@ -436,43 +459,74 @@ function leaveGame() {
   Music.stop();                 // silence the music when we leave the level
   clearLevelRules();            // and give back any numbers the level borrowed
   S.campaign = false;           // leaving always ends "Play All" mode
+  const wasInAdventure = S.adventureId;
+  S.adventureId = null;
   document.getElementById("hud").classList.add("hidden");
   document.getElementById("attempts").classList.add("hidden");
   document.getElementById("topLeftBtns").classList.add("hidden");
   document.getElementById("practiceBtns").classList.add("hidden");
+  // Go back where you came from: the editor if you were play-testing, the
+  // adventure you were in the middle of, or the main menu.
   if (S.testMode) { S.screen = "editor"; showScreen("editorScreen"); layoutEditor(); }
+  else if (wasInAdventure != null) { openAdventures(wasInAdventure); }
   else { S.screen = "menu"; showScreen("menuScreen"); }
 }
-function afterWin() {
+async function afterWin() {
+  // Inside an ADVENTURE, winning unlocks the next level and takes you
+  // straight to it. When there's nothing left, cheer and come back.
+  if (S.adventureId != null && !S.testMode) {
+    const inThisAdventure = S.adventureId;
+    // WAIT for "I finished it" to reach the server before asking what's
+    // next. Without this we'd ask before the frontier had moved and be
+    // sent straight back into the level we just beat, over and over.
+    try { await runReport; } catch (e) { /* it tells us itself if it failed */ }
+    // Still here? A tap on Menu (or Escape) while we waited means the kid
+    // has already left, and we must not drag them into another level.
+    if (S.screen !== "game" || S.adventureId !== inThisAdventure) return;
+    const next = await nextInAdventure(inThisAdventure);
+    if (S.screen !== "game" || S.adventureId !== inThisAdventure) return;
+    if (next) playServerLevel(next.level, { adventureId: inThisAdventure });
+    else { showToast("Adventure complete! 🎉"); leaveGame(); }
+    return;
+  }
   // In "Play All" mode, winning jumps straight to the next level. When you
   // finish the last one, cheer and go back to the menu.
   if (S.campaign && !S.testMode) {
     S.campaignIndex++;
-    if (S.campaignIndex < serverLevels.length) { startLevelByIndex(S.campaignIndex); return; }
+    const all = listedLevels();
+    if (S.campaignIndex < all.length) { playServerLevel(all[S.campaignIndex], {}, S.campaignIndex); return; }
     showToast("You beat them all! 🎉");
   }
   leaveGame();
 }
 
-// Play the level at position `i` in the menu list (used by "Play All").
-function startLevelByIndex(i) {
-  const L = serverLevels[i];
+/* ----------------------------------------------------------------
+   PLAY ONE OF THE SERVER'S LEVELS. The menu and the adventures screen
+   both hand us a whole level record; this is the one place that turns
+   it into a game — parsing the grid, picking the tune, and passing on
+   everything else the level carries.
+   ---------------------------------------------------------------- */
+function playServerLevel(L, extras, position) {
   if (!L) { leaveGame(); return; }
-  startLevel(parseLevel(L.level, L.messages), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id,
-             { reward: L.reward, rules: L.rules });
+  const i = (position != null) ? position : listedLevels().indexOf(L);
+  startLevel(parseLevel(L.level, L.messages), false, isPracticeOn(),
+             songForLevel(L, Math.max(0, i)), L.theme || 0, L.id,
+             { reward: L.reward, rules: L.rules, ...(extras || {}) });
 }
 
-// "Play All": start at the first level and roll through them all in order.
+// "Play All": start at the first published level and roll through them
+// all in the order they're listed in.
 function startCampaign() {
-  if (!serverLevels.length) { showToast("No levels yet — make one first!"); return; }
+  const all = listedLevels();
+  if (!all.length) { showToast("No levels yet — make one first!"); return; }
   S.campaign = true;
   S.campaignIndex = 0;
-  startLevelByIndex(0);
+  playServerLevel(all[0], {}, 0);
 }
 
 // ---------------- Screens ----------------
 // Every full-page screen there is. showScreen(null) means "we're playing".
-const SCREENS = ["loginScreen", "menuScreen", "editorScreen", "skinScreen"];
+const SCREENS = ["loginScreen", "menuScreen", "editorScreen", "skinScreen", "adventureScreen"];
 function showScreen(id) {
   for (const s of SCREENS) document.getElementById(s).classList.toggle("hidden", s !== id);
   if (id !== null) {
@@ -488,11 +542,12 @@ function showScreen(id) {
    server (server.js) when it starts. Everything the game asks for
    goes through these helpers. */
 
-// The levels we downloaded from the server (the editor's Edit buttons use this).
-let serverLevels = [];
+// The levels themselves live in js/ui/menu.js now — it owns the list, the
+// tabs and every button on a level. Ask it with menuLevels() / listedLevels().
 
 // Everyone's high scores (each player's best % on each level). Downloaded at
-// start and kept fresh as new scores come in.
+// start and kept fresh as new scores come in. These stay here because the
+// game itself draws them: render.js reads them off gameView while you play.
 let serverScores = [];
 
 /* ================================================================
@@ -534,93 +589,8 @@ async function submitScore(percent) {
     // That's this level's fresh leaderboard. Fold it back into our copy so
     // menus/overlays show the new numbers.
     serverScores = serverScores.filter(s => Number(s.levelId) !== Number(S.levelId)).concat(board);
-    if (S.screen === "menu") buildMenu(serverLevels);
+    if (S.screen === "menu") buildMenu();
   } catch (e) { /* a lost score is no big deal — just keep playing */ }
-}
-
-// menu buttons
-const list = document.getElementById("levelList");
-function buildMenu(levels) {
-  list.innerHTML = "";
-  if (!levels.length) {
-    list.innerHTML = '<div style="color:#fff;font-weight:bold">No levels yet — tap the Level Editor to make one!</div>';
-    return;
-  }
-  levels.forEach((L, i) => {
-    const item = document.createElement("div");
-    item.className = "levelItem";
-    // The big green button plays the level. Its second line shows the top
-    // score and your own best, so kids can see what to beat.
-    const play = document.createElement("button");
-    play.className = "btn green";
-    const title = (i + 1) + ". " + L.name + (L.author ? "  — " + L.author : "");
-    play.innerHTML = '<div>' + escapeHtml(title) + '</div>' + lookLine(L) +
-      '<div class="levelScore">' + scoreLine(L.id) + '</div>';
-    play.onclick = () => { S.campaign = false;
-      startLevel(parseLevel(L.level, L.messages), false, isPracticeOn(), songForLevel(L, i), L.theme || 0, L.id,
-                 { reward: L.reward, rules: L.rules }); };
-    // ...a little 📊 opens the full leaderboard for this level...
-    const board = document.createElement("button");
-    board.className = "btn small"; board.textContent = "📊"; board.title = "High scores";
-    board.onclick = () => openScores(L);
-    item.append(play, board);
-
-    // The rest of the buttons only appear if you're allowed to use them.
-    // (The server checks again for real — this is just tidiness, so kids
-    // don't tap things that were only going to say no.)
-    if (may("level.reorder")) {
-      // ...the up/down buttons move it earlier or later in the list...
-      const up = document.createElement("button");
-      up.className = "btn small"; up.textContent = "▲"; up.title = "Move up";
-      up.disabled = (i === 0);
-      up.onclick = () => moveLevel(i, -1);
-      const down = document.createElement("button");
-      down.className = "btn small"; down.textContent = "▼"; down.title = "Move down";
-      down.disabled = (i === levels.length - 1);
-      down.onclick = () => moveLevel(i, +1);
-      item.append(up, down);
-    }
-    if (may("level.edit", L)) {
-      // ...the pencil opens it in the editor to change it...
-      const edit = document.createElement("button");
-      edit.className = "btn small"; edit.textContent = "✎"; edit.title = "Edit";
-      edit.onclick = () => openLevelForEdit(L);
-      item.append(edit);
-    }
-    if (may("level.delete", L)) {
-      // ...and the trash can deletes it (after an "are you sure?").
-      const del = document.createElement("button");
-      del.className = "btn small pink"; del.textContent = "🗑"; del.title = "Delete";
-      del.onclick = () => deleteLevel(L);
-      item.append(del);
-    }
-    list.appendChild(item);
-  });
-}
-
-// Levels that are played as their own character say so on the button, so you
-// can see the prize before you start. 🔒 until you've won it, 🎭 once it's yours.
-function lookLine(L) {
-  if (!L.reward || !L.reward.name) return "";
-  const got = ownLook(L.reward.skin);
-  return '<div class="levelLook">' + (got ? "🎭 " : "🔒 ") + escapeHtml(L.reward.name) + '</div>';
-}
-
-// The little grey line under a level's name: the top score and your own best.
-function scoreLine(levelId) {
-  const top = leaderboardFor(levelId)[0];
-  if (!top) return "No scores yet — be the first!";
-  let line = "🏆 " + top.percent + "% " + escapeHtml(top.player);
-  const mine = myBest(levelId);
-  if (mine != null) line += "   ·   you " + mine + "%";
-  return line;
-}
-
-// Keep names safe to drop straight into the button's HTML.
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => (
-    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
-  ));
 }
 
 /* ================================================================
@@ -716,32 +686,9 @@ initSkins({
     setWalletFromMe(saved);
     updateMenuBar();
     S.screen = "menu"; showScreen("menuScreen");
-    buildMenu(serverLevels);
+    buildMenu();
   },
 });
-
-/* ================================================================
-   =====================  THE 📊 LEADERBOARD  =====================
-   ================================================================ */
-
-// Show every player's best on one level, best first.
-function openScores(L) {
-  document.getElementById("scoresTitle").textContent = "🏆 " + L.name;
-  const listEl = document.getElementById("scoresList");
-  const board = leaderboardFor(L.id);
-  if (!board.length) {
-    listEl.innerHTML = '<div class="scoreRow">No scores yet — go play it!</div>';
-  } else {
-    listEl.innerHTML = board.map((s, i) => {
-      const mine = isMyScore(s) ? " you" : "";
-      return '<div class="scoreRow' + (mine ? " me" : "") + '">' +
-        '<span>' + (i + 1) + ". " + escapeHtml(s.player) + '</span>' +
-        '<span>' + s.percent + '%</span></div>';
-    }).join("");
-  }
-  document.getElementById("scoresBox").classList.remove("hidden");
-}
-document.getElementById("scoresCloseBtn").onclick = () => document.getElementById("scoresBox").classList.add("hidden");
 
 // Is the "Practice mode" box ticked?
 function isPracticeOn() { return document.getElementById("practiceChk").checked; }
@@ -751,43 +698,50 @@ function songForLevel(L, i) {
   return (L.song !== undefined && L.song !== null) ? L.song : (i % SONGS.length);
 }
 
-// Move the level at position `index` up (-1) or down (+1) and save the new
-// order to the server so everyone sees it.
-async function moveLevel(index, dir) {
-  const j = index + dir;
-  if (j < 0 || j >= serverLevels.length) return;
-  const order = serverLevels.map(L => L.id);
-  [order[index], order[j]] = [order[j], order[index]];   // swap the two ids
-  try {
-    await apiWrite("PUT", "/levels/order", { order });
-    serverLevels = await apiGet("/levels");
-    buildMenu(serverLevels);
-  } catch (e) { showToast(e.message); }
-}
-
-// Ask "are you sure?" then delete the level from the server.
-async function deleteLevel(L) {
-  const ok = await askConfirm("Delete \"" + L.name + "\"? This can't be undone here.");
-  if (!ok) return;
-  try {
-    await apiDelete("/levels/" + L.id);
-    serverLevels = await apiGet("/levels");
-    buildMenu(serverLevels);
-    showToast("Deleted.");
-  } catch (e) { showToast(e.message); }
-}
-
-// Open one of the server's levels in the editor so it can be changed and
-// saved back in place (instead of making a brand-new copy).
-
 // Show a friendly note on the menu (used when the server can't be reached).
 function menuMessage(msg) {
-  list.innerHTML = '<div style="color:#fff;font-weight:bold;max-width:80vw;text-align:center">' + msg + '</div>';
+  document.getElementById("levelList").innerHTML =
+    '<div class="menuEmpty">' + escapeHtml(msg) + "</div>";
 }
 
 document.getElementById("playAllBtn").onclick = startCampaign;
 
 document.getElementById("openEditorBtn").onclick = openNewLevel;
+
+/* ================================================================
+   ==============  THE LEVEL LIST AND THE ADVENTURES  =============
+   ================================================================
+   Both are full screens of their own now (js/ui/menu.js and
+   js/ui/adventures.js). They get what they need here and hand their
+   answers back the same way — neither of them ever reaches into this
+   file's own variables. */
+initMenu({
+  S, showScreen,
+  // Play one of the server's levels straight from the list.
+  startLevel: (L, i) => playServerLevel(L, {}, i),
+  openLevelForEdit,
+  leaderboardFor, myBest, isMyScore,
+  may, currentAccount,
+  openAdventures,
+  // The server just took (or gave back) some coins — take its word for
+  // the purse, and ONLY the purse. (setWalletFromMe would throw away
+  // which coins you'd already collected and which cubes you own.)
+  onCoinsChanged: (answer) => {
+    if (answer && answer.balance != null) {
+      setBalance(answer.balance, answer.coinsEarnedTotal);
+      updateMenuBar();
+    }
+  },
+});
+
+initAdventures({
+  S, showScreen,
+  playLevel: (L, extras) => playServerLevel(L, extras),
+  may,
+  levelById,
+  listedLevels,
+  backToMenu: () => { S.screen = "menu"; showScreen("menuScreen"); },
+});
 
 /* ================================================================
    ========================  CONTROL PANEL  ========================
@@ -821,15 +775,15 @@ initEditor({
       onCancel: () => backToEditor(),
     });
   },
+  // Every level there is, so the 🎲 dice never picks a name somebody
+  // else is already using.
+  getLevelNames: () => menuLevels().map(L => L.name),
   onSaved: async (created) => {
-    serverLevels = await apiGet("/levels");   // keep our copy fresh for the menu
-    buildMenu(serverLevels);
-    // Making a brand-new level earns a thank-you. Say so!
-    if (created && created.bounty && created.bounty.credited > 0) {
-      setWalletFromMe({ ...currentAccount(), coins: created.bounty.balance,
-        coinsEarnedTotal: created.bounty.coinsEarnedTotal });
-      updateMenuBar();
-      showToast("+" + created.bounty.credited + " coins for a new level! 🎉");
+    await refreshLevels();          // keep the menu's copy fresh
+    // A brand-new level is a DRAFT: free, and only you can see it. Say so,
+    // so nobody wonders why their level isn't on everybody else's tablet.
+    if (created) {
+      showToast("Saved as a draft — tap ⇧ Publish when it's ready! ✎");
     }
   },
 });
@@ -867,9 +821,9 @@ async function loadWorld() {
       apiGet("/levels"),
       apiGet("/scores"),
     ]);
-    serverLevels = levels;
-    serverScores = scores;
-    buildMenu(levels);
+    serverScores = scores;          // the game itself draws these while you play
+    setLevels(levels);              // ...and js/ui/menu.js owns the levels
+    buildMenu();
     updateMenuBar();
   } catch (e) {
     console.error(e);
@@ -880,6 +834,7 @@ async function loadWorld() {
 async function init() {
   initZoomGuard();                 // don't let the tablet zoom the page about
   loadPrices();                    // for the cube shop; fine if it's slow
+  loadWords();                     // ...and the words the 🎲 dice picks from
   let me = null;
   try { me = await apiGet("/me"); } catch (e) { me = null; }
 

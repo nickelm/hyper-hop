@@ -41,6 +41,9 @@ const levelsRoutes = require("./routes/levels");
 const scoresRoutes = require("./routes/scores");
 const accountsRoutes = require("./routes/accounts");
 const runsRoutes = require("./routes/runs");
+const starsRoutes = require("./routes/stars");
+const adventuresRoutes = require("./routes/adventures");
+const wordsRoutes = require("./routes/words");
 const leaderboardRoutes = require("./routes/leaderboard");
 const pricesRoutes = require("./routes/prices");
 
@@ -73,6 +76,9 @@ app.use("/api/levels", levelsRoutes);
 app.use("/api/scores", scoresRoutes);
 app.use("/api/accounts", accountsRoutes);
 app.use("/api/runs", runsRoutes);
+app.use("/api/stars", starsRoutes);
+app.use("/api/adventures", adventuresRoutes);
+app.use("/api/words", wordsRoutes);
 app.use("/api/leaderboard", leaderboardRoutes);
 app.use("/api/prices", pricesRoutes);
 
@@ -91,7 +97,11 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({ error: "The game server got confused. Try again! 😅" });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log("Hyper Hop is running →  http://localhost:" + PORT);
   if (READ_ONLY) console.log("READ_ONLY is on: editing is frozen.");
 });
+
+// Handed out so the tests (test/api.js) can start a real server and
+// then stop it again. Nothing else uses this.
+module.exports = server;

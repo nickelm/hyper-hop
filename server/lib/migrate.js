@@ -1,17 +1,23 @@
 // ============================================================
-// migrate.js — the one-time move from "players" to "accounts".
+// migrate.js — the one-time tidy-ups, done at start-up.
 // ============================================================
-// Hyper Hop used to have data/profiles.json: just a name and a cube,
-// no password, no coins. Now it has data/accounts.json, where every
-// player can log in and has a purse. This file does that move ONCE,
-// the first time the new server starts, and then never again.
+// Two of them, each done ONCE and then never again:
 //
-// The important promise: NOBODY LOSES ANYTHING. Every name we can
-// find — in the old players file, on the high-score board, or on a
+//   1. players → accounts. Hyper Hop used to have data/profiles.json:
+//      just a name and a cube, no password, no coins. Now it has
+//      data/accounts.json, where every player can log in and has a
+//      purse.
+//   2. levels → the level lifecycle. Levels used to be either there or
+//      not there. Now every level is a draft, listed or hidden, and no
+//      two levels may share a name.
+//
+// The important promise for both: NOBODY LOSES ANYTHING. Every name we
+// can find — in the old players file, on the high-score board, or on a
 // level somebody made — becomes an account, keeping its cube, its
 // scores and its levels. Those accounts start with no password, so
 // the first time a kid taps their name the game says "pick a
-// password" and it becomes theirs.
+// password" and it becomes theirs. And every level that already
+// existed becomes a LISTED one, so nothing a kid made disappears.
 
 "use strict";
 
@@ -23,6 +29,7 @@ const {
 } = require("./storage");
 const { cleanSkin } = require("./validate");
 const { getPrices } = require("./prices");
+const { randomLevelName } = require("./words");
 
 // The first grown-up. Everybody else starts as a "player". Change
 // anybody's job later by editing data/accounts.json by hand.
@@ -31,7 +38,7 @@ const FIRST_ADMIN_NAME = "Nick";
 // Levels that came with the game aren't "made by" a real person.
 const BUILT_IN_AUTHOR = "built-in";
 
-function migrate() {
+function migrateProfiles() {
   // ---- The one-way gate ----------------------------------------
   // Having even one saved account means we already did this. (The
   // file itself always exists — the first-run setup makes an empty
@@ -86,7 +93,7 @@ function migrate() {
       coins: prices.startingCoins,
       coinsEarnedTotal: 0,
       collectedCoins: {},
-      bountiesPaid: 0,          // filled in below, once we know who owns what
+      adventureProgress: {},    // which levels of each adventure they've beaten
       createdAt: now,
       updatedAt: now,
     };
@@ -104,14 +111,6 @@ function migrate() {
   for (const L of levels) {
     L.ownerId = whoIs(L.author);
     if (L.ownerId != null) owned++;
-  }
-
-  // Levels somebody already made count as already paid for. We're not
-  // handing out backdated bounties for old levels — and this also
-  // means nobody can delete their old levels and "re-make" them for
-  // coins. From here on, only genuinely new levels pay.
-  for (const account of accounts) {
-    account.bountiesPaid = levels.filter(L => Number(L.ownerId) === Number(account.id)).length;
   }
 
   /* ---- 4. Tie every score to its player ------------------------
@@ -151,4 +150,66 @@ function migrate() {
   );
 }
 
-module.exports = { migrate, FIRST_ADMIN_NAME };
+/* ================================================================
+   =========  2. EVERY OLD LEVEL JOINS THE NEW LIFECYCLE  =========
+   ================================================================
+   Levels used to be simply "there". Now each one is a draft, listed
+   or hidden, and no two may share a name. This gives the levels that
+   already existed their place in that world, once:
+
+     - they all become LISTED. They were already out there for
+       everybody to play, and publishing is not something we can do on
+       a kid's behalf (it costs coins), so nothing changes for anyone.
+     - a level called "My Level" — the old default name, which lots of
+       levels ended up sharing — gets a proper name from the dice.
+     - any other clash keeps the FIRST level's name and renames the
+       later ones, so the "one name, one level" rule starts out true.
+
+   The gate is meta.json's levelsUpgradedAt, and it is written LAST —
+   so a crash half-way just means we try the whole thing again next
+   time rather than leaving the levels half-done.
+   ================================================================ */
+const OLD_DEFAULT_NAME = "my level";
+
+function upgradeLevels() {
+  const meta = fs.existsSync(META_FILE) ? readJson(META_FILE) : {};
+  if (meta.levelsUpgradedAt) return;              // already done
+
+  const levels = readJson(LEVELS_FILE);
+  const now = new Date().toISOString();
+  let renamed = 0;
+
+  // Names we've already handed out, so a new one can't clash either.
+  const taken = new Set();
+  for (const L of levels) {
+    if (!L.status) L.status = "listed";           // it was already playable by everyone
+    if (L.bounty === undefined) L.bounty = null;  // and nobody had put a prize on it
+    if (!L.createdAt) L.createdAt = L.updatedAt || now;
+
+    const name = String(L.name || "").trim();
+    const key = name.toLowerCase();
+    // A level called "My Level" (or one whose name is already spoken
+    // for) gets a fresh one from the dice.
+    if (!name || key === OLD_DEFAULT_NAME || taken.has(key)) {
+      L.name = randomLevelName(taken);
+      renamed++;
+    }
+    taken.add(String(L.name).toLowerCase());
+  }
+
+  writeJsonWithBackup(LEVELS_FILE, levels);
+  meta.levelsUpgradedAt = now;
+  writeJsonWithBackup(META_FILE, meta);           // the gate closes here
+
+  console.log("Levels upgraded: " + levels.length + " now listed" +
+    (renamed ? ", " + renamed + " given a fresh name 🎲" : "") + ".");
+}
+
+// Both tidy-ups, in order. Each one decides for itself whether it has
+// anything to do, so calling this on every start-up is free.
+function migrate() {
+  migrateProfiles();
+  upgradeLevels();
+}
+
+module.exports = { migrate, migrateProfiles, upgradeLevels, FIRST_ADMIN_NAME };

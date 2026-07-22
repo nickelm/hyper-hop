@@ -14,6 +14,7 @@ import { parseLevel } from "../game/level.js";
 import { Music, SONGS } from "../music.js";
 import { apiWrite, askConfirm } from "../api.js";
 import { maxCoinsPerLevel } from "../economy.js";
+import { rollLevelName } from "../names.js";
 import { LEVEL_RULES, countRules } from "../rules.js";
 import { showToast } from "./toast.js";
 import { initScrollbars } from "./scrollbars.js";
@@ -23,6 +24,7 @@ let S = null;
 let showScreen = () => {};
 let startLevel = () => {};
 let getPlayerName = () => "";
+let getLevelNames = () => [];
 let onSaved = async () => {};
 let editLook = () => {};
 
@@ -31,6 +33,7 @@ export function initEditor(deps) {
   showScreen = deps.showScreen;
   startLevel = deps.startLevel;
   getPlayerName = deps.getPlayerName;
+  getLevelNames = deps.getLevelNames;   // so the 🎲 never picks a taken name
   onSaved = deps.onSaved;
   editLook = deps.editLook;      // opens the cube editor to design this level's look
 }
@@ -144,24 +147,26 @@ TOOLS.forEach(t => {
 const eCanvas = document.getElementById("editorCanvas");
 const eCtx = eCanvas.getContext("2d");
 const eWrap = document.getElementById("editorGridWrap");
+// The level's real size lives on this: the canvas is only the little window we
+// look through it with, so THIS is what makes the box scroll (see drawEditor).
+const eSpace = document.getElementById("editorGridSpace");
 
 /* ----------------------------------------------------------------
    HOW BIG IS ONE SQUARE ON SCREEN?
    Tablets are all different sizes, so we don't pick a number — we
-   work it out. At zoom 0 the WHOLE level is shrunk to fit the space
-   we have, so it can never be cut off. Each tap on  🔍+  makes the
-   squares bigger — as big as MAX_CELL, which is far past "the whole
-   level fits", so you can get right in close to fiddle with one
-   corner. Once the grid is bigger than the box you see it in, the
-   scroll bars appear and you slide it around with them.
+   work it out. Zoom 0 shrinks the WHOLE level to fit the space we
+   have, so it can never be cut off, and the last tap on 🔍+ gets you
+   all the way to MAX_CELL — big, comfortable squares you can fiddle
+   with one at a time. The taps in between are spread evenly, so a
+   2000-square level zooms in exactly like a 40-square one does.
+   (It used to be "each tap multiplies by 1.3", which sounds the same
+   but isn't: on a very long level the first several taps all came out
+   the same size and 🔍+ looked broken.)
+   Once the grid is bigger than the box you see it in, the scroll bars
+   appear and you slide it around with them.
    ---------------------------------------------------------------- */
 const MIN_CELL = 8, MAX_CELL = 72;
-const ZOOM_STEP = 1.3;
 const MAX_ZOOM = 10;             // how many times you can tap 🔍+
-// A tablet gives up if you ask it to draw a picture bigger than this (it just
-// goes blank), so a very WIDE level can't be zoomed in quite as far as a short
-// one. Without this, zooming right in on a 300-square level would show nothing.
-const MAX_CANVAS = 8192;
 
 function fitCell() {
   // How much room the grid has. If the editor isn't on screen yet we
@@ -171,10 +176,13 @@ function fitCell() {
   if (!(availW > 0) || !(availH > 0)) return 24;
   return Math.min(availW / ED.cols, availH / ED.rows);   // fit BOTH ways
 }
-function computeCell() {
-  const wanted = fitCell() * Math.pow(ZOOM_STEP, ED.zoom);
-  const biggest = Math.min(MAX_CELL, Math.floor(MAX_CANVAS / Math.max(ED.cols, ED.rows, 1)));
-  return Math.max(MIN_CELL, Math.min(biggest, Math.floor(wanted)));
+// How big one square is at a given zoom. Zoom 0 is "the whole level fits" (but
+// never so tiny you can't see it), MAX_ZOOM is as close as you can get, and the
+// steps in between are spread evenly between the two.
+function cellAtZoom(zoom) {
+  const smallest = Math.max(MIN_CELL, Math.min(MAX_CELL, fitCell()));
+  const t = Math.max(0, Math.min(MAX_ZOOM, zoom)) / MAX_ZOOM;
+  return Math.round(smallest * Math.pow(MAX_CELL / smallest, t));
 }
 
 // Our own scroll bars (js/ui/scrollbars.js) — a finger on the canvas always
@@ -185,13 +193,37 @@ const bars = initScrollbars({
   yBar: document.getElementById("edScrollY"),
 });
 
+/* ----------------------------------------------------------------
+   DRAWING THE LEVEL — through a window.
+   A really long level is far too big to draw all at once (a tablet
+   just gives up and shows nothing above about 8000 pixels), and there
+   would be no point anyway: you can only look at one bit at a time.
+   So the canvas is only ever as big as the box you see it in, and we
+   draw JUST the squares that are inside it. #editorGridSpace behind it
+   is the level's full size, which is what makes the box scroll and
+   what the scroll bars measure themselves against.
+   ---------------------------------------------------------------- */
 function drawEditor() {
-  ED.cell = computeCell();
+  ED.cell = cellAtZoom(ED.zoom);
   const c = ED.cell;
-  eCanvas.width = ED.cols * c; eCanvas.height = ED.rows * c;
-  eCtx.fillStyle = "#1a1a38"; eCtx.fillRect(0, 0, eCanvas.width, eCanvas.height);
-  for (let r = 0; r < ED.rows; r++) for (let col = 0; col < ED.cols; col++) {
-    const x = col * c, y = r * c, ch = ED.grid[r][col];
+  const gridW = ED.cols * c, gridH = ED.rows * c;
+  eSpace.style.width = gridW + "px"; eSpace.style.height = gridH + "px";
+
+  // How big the window is, and which corner of the level it looks at. If the
+  // editor isn't on screen we can't measure any of that, so draw a sensible
+  // chunk of the top-left corner instead of nothing at all.
+  const canMeasure = eWrap.clientWidth > 0 && eWrap.clientHeight > 0;
+  const viewW = Math.min(gridW, canMeasure ? eWrap.clientWidth : 1200);
+  const viewH = Math.min(gridH, canMeasure ? eWrap.clientHeight : 1200);
+  const offX = canMeasure ? eWrap.scrollLeft : 0;
+  const offY = canMeasure ? eWrap.scrollTop : 0;
+
+  eCanvas.width = viewW; eCanvas.height = viewH;
+  eCtx.fillStyle = "#1a1a38"; eCtx.fillRect(0, 0, viewW, viewH);
+  const colFrom = Math.max(0, Math.floor(offX / c)), colTo = Math.min(ED.cols - 1, Math.floor((offX + viewW) / c));
+  const rowFrom = Math.max(0, Math.floor(offY / c)), rowTo = Math.min(ED.rows - 1, Math.floor((offY + viewH) / c));
+  for (let r = rowFrom; r <= rowTo; r++) for (let col = colFrom; col <= colTo; col++) {
+    const x = col * c - offX, y = r * c - offY, ch = ED.grid[r][col];
     eCtx.strokeStyle = "rgba(255,255,255,.08)"; eCtx.strokeRect(x, y, c, c);
     if (ch === "#") { eCtx.fillStyle = CONFIG.BLOCK_COLOR; eCtx.fillRect(x+2, y+2, c-4, c-4); }
     else if (ch === "/" || ch === "\\" || ch === "L" || ch === "7") {
@@ -274,12 +306,25 @@ function drawEditor() {
       eCtx.fillRect(x+c-7, y+c/3, 4, c-c/3);        // right wall
     }
   }
-  // floor hint
-  eCtx.fillStyle = "rgba(255,255,255,.5)";
-  eCtx.fillRect(0, eCanvas.height - 2, eCanvas.width, 2);
+  // floor hint — the ground the level stands on, only drawn when it's in the window
+  const floorY = gridH - offY - 2;
+  if (floorY >= 0 && floorY < viewH) {
+    eCtx.fillStyle = "rgba(255,255,255,.5)";
+    eCtx.fillRect(0, floorY, viewW, 2);
+  }
   bars.refresh();                        // the grid changed size — move the scroll bars to match
   updateCoinCount();
 }
+
+// Sliding the box along shows a different part of the level, so the window has
+// to be painted again. Once per frame is plenty — a dragged scroll bar fires
+// this over and over.
+let redrawWaiting = false;
+eWrap.addEventListener("scroll", () => {
+  if (redrawWaiting) return;
+  redrawWaiting = true;
+  requestAnimationFrame(() => { redrawWaiting = false; drawEditor(); });
+});
 
 /* ----------------------------------------------------------------
    HOW MANY COINS? A level may only hold so many (the server decides
@@ -328,9 +373,11 @@ function updateCoinCount() {
 // asks you to write on — otherwise dragging a row of signposts would pop the
 // keyboard up over and over.
 function edPaint(e, firstTouch) {
+  // The canvas is only the window onto the level, so where you tapped has to be
+  // added to how far along the level we've scrolled to.
   const rect = eCanvas.getBoundingClientRect();
-  const col = Math.floor((e.clientX - rect.left) / ED.cell);
-  const r   = Math.floor((e.clientY - rect.top) / ED.cell);
+  const col = Math.floor((e.clientX - rect.left + eWrap.scrollLeft) / ED.cell);
+  const r   = Math.floor((e.clientY - rect.top  + eWrap.scrollTop)  / ED.cell);
   if (r < 0 || r >= ED.rows || col < 0 || col >= ED.cols) return;
   // Dragging a finger sends this square after square; redrawing the whole grid
   // for one that is ALREADY what you're painting would just make it stutter.
@@ -449,18 +496,23 @@ document.getElementById("messageCancelBtn").onclick = closeSignBox;
    ---------------------------------------------------------------- */
 function zoomBy(step) {
   // where the middle of the view is, as a fraction of the whole grid (0..1)
-  const midX = (eWrap.scrollLeft + eWrap.clientWidth / 2) / Math.max(1, eCanvas.width);
-  const midY = (eWrap.scrollTop + eWrap.clientHeight / 2) / Math.max(1, eCanvas.height);
-  const before = ED.cell;
-  const wanted = Math.max(0, Math.min(MAX_ZOOM, ED.zoom + step));
-  if (wanted === ED.zoom) return;
-  ED.zoom = wanted;
+  const gridW = ED.cols * ED.cell, gridH = ED.rows * ED.cell;
+  const midX = (eWrap.scrollLeft + eWrap.clientWidth / 2) / Math.max(1, gridW);
+  const midY = (eWrap.scrollTop + eWrap.clientHeight / 2) / Math.max(1, gridH);
+  // Keep stepping until the squares really do change size. Two zoom steps can
+  // land on the same size once the numbers get rounded, and a tap that seems to
+  // do nothing feels broken — so we take another one instead of stopping.
+  let z = ED.zoom;
+  while (z + step >= 0 && z + step <= MAX_ZOOM) {
+    z += step;
+    if (cellAtZoom(z) !== ED.cell) break;
+  }
+  if (cellAtZoom(z) === ED.cell) return;      // as close (or as far out) as it goes
+  ED.zoom = z;
   drawEditor();
-  // Nothing actually got bigger? Then this is as close as this tablet can draw
-  // (see MAX_CANVAS) — put the zoom back, so 🔍− works on the very next tap.
-  if (step > 0 && ED.cell === before) { ED.zoom -= step; drawEditor(); return; }
-  eWrap.scrollLeft = midX * eCanvas.width - eWrap.clientWidth / 2;
-  eWrap.scrollTop  = midY * eCanvas.height - eWrap.clientHeight / 2;
+  eWrap.scrollLeft = midX * (ED.cols * ED.cell) - eWrap.clientWidth / 2;
+  eWrap.scrollTop  = midY * (ED.rows * ED.cell) - eWrap.clientHeight / 2;
+  drawEditor();                     // we're looking somewhere else now, so paint that
   bars.refresh();
 }
 document.getElementById("zoomInBtn").onclick = () => {
@@ -468,7 +520,7 @@ document.getElementById("zoomInBtn").onclick = () => {
   zoomBy(1);
 };
 document.getElementById("zoomOutBtn").onclick = () => {
-  if (ED.zoom <= 0) return;              // 0 = the whole level already fits
+  if (ED.zoom <= 0) return;              // 0 = as far out as it goes
   zoomBy(-1);
 };
 /* ----------------------------------------------------------------
@@ -516,7 +568,14 @@ export function layoutEditor() { checkEditorFits(); drawEditor(); }
 window.addEventListener("resize", () => { if (S && S.screen === "editor") layoutEditor(); });
 
 document.getElementById("widerBtn").onclick = () => {
-  ED.cols += 10; ED.grid.forEach(row => { for (let i = 0; i < 10; i++) row.push("."); });
+  // A level can only be so long (the server thinks so too — see MAX_COLS in
+  // validate.js), so say so here rather than letting the save fail later.
+  if (ED.cols >= CONFIG.MAX_LEVEL_COLS) {
+    showToast("That's as long as a level gets (" + CONFIG.MAX_LEVEL_COLS + " squares)");
+    return;
+  }
+  const add = Math.min(10, CONFIG.MAX_LEVEL_COLS - ED.cols);
+  ED.cols += add; ED.grid.forEach(row => { for (let i = 0; i < add; i++) row.push("."); });
   drawEditor();
 };
 document.getElementById("narrowBtn").onclick = () => {
@@ -646,10 +705,30 @@ document.getElementById("rulesTryBtn").onclick = () => { rulesBox.classList.add(
 function escapeName(name) {
   return name.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
 }
+// The level's name — and if the box is empty, the dice picks one rather
+// than everybody ending up with a level called "My Level". (That really
+// happened: three of them, all called the same thing.)
 function levelName() {
-  const n = document.getElementById("levelNameInput").value.trim();
-  return n === "" ? "My Level" : n;
+  const typed = document.getElementById("levelNameInput").value.trim();
+  if (typed) return typed;
+  const rolled = rollLevelName(getLevelNames());
+  document.getElementById("levelNameInput").value = rolled;
+  return rolled;
 }
+
+/* ----------------------------------------------------------------
+   THE 🎲 DICE. Every level needs its OWN name — no two levels may be
+   called the same thing — and thinking one up is the boring bit. Tap
+   the dice and it makes one out of two words ("Turbo Canyon"), never
+   picking one somebody else is already using.
+   ---------------------------------------------------------------- */
+document.getElementById("diceBtn").onclick = () => {
+  // Every name there is, except this level's own — otherwise re-rolling
+  // a saved level would treat its current name as "taken".
+  const mine = levelName().toLowerCase();
+  const taken = getLevelNames().filter(n => String(n).toLowerCase() !== mine);
+  document.getElementById("levelNameInput").value = rollLevelName(taken);
+};
 document.getElementById("copyBtn").onclick = () => {
   // The signs ride along as one extra line. A level with no signs doesn't
   // get the line at all, so the code looks just like it always did.
@@ -776,8 +855,9 @@ async function saveToServer() {
       ED.editingId = created.id;         // from now on, saving updates this same level
     }
     showToast("Saved!");
-    // `created` carries the new-level bounty (if any) so main.js can
-    // cheer about it and update the purse.
+    // `created` is the brand-new level (or null when we just updated an
+    // existing one), so main.js can say "that's a draft — publish it
+    // when you're ready" only the first time.
     await onSaved(created);   // main.js refreshes its level list and the menu
   } catch (e) {
     showToast(e.message);
@@ -800,7 +880,8 @@ document.getElementById("saveServerBtn").onclick = () => {
   else saveToServer();
 };
 document.getElementById("saveConfirmBtn").onclick = () => {
-  const name = document.getElementById("saveNameInput").value.trim() || "My Level";
+  const name = document.getElementById("saveNameInput").value.trim()
+    || rollLevelName(getLevelNames());
   const author = document.getElementById("saveAuthorInput").value.trim();
   if (!author) { showToast("Please type who made it."); return; }
   document.getElementById("levelNameInput").value = name;
@@ -835,6 +916,9 @@ export function openNewLevel() {
   ED.editingId = null; ED.author = getPlayerName() || "";
   ED.reward = null;                    // a new level has no look of its own yet
   ED.rules = {};                       // ...and plays by the normal rules
+  // A fresh name, ready to be changed or re-rolled. Starting with a name
+  // already in the box beats starting with an empty one you have to fill in.
+  document.getElementById("levelNameInput").value = rollLevelName(getLevelNames());
   updateLookBtn();
   updateRulesBtn();
   S.screen = "editor"; showScreen("editorScreen"); layoutEditor();

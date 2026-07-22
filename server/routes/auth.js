@@ -94,6 +94,10 @@ router.post("/login", loadAccount, (req, res) => {
     });
   }
 
+  // We re-read accounts.json on EVERY login, on purpose. That is what
+  // makes a forgotten password a ten-second job: a grown-up sets that
+  // account's "passwordHash" back to null in the file, and the very
+  // next tap on that name offers to pick a new one. No restart.
   const account = findByName(readJson(ACCOUNTS_FILE), name);
 
   // An account nobody has claimed yet has no password. Tell the game
@@ -181,7 +185,7 @@ router.post("/accounts", notFrozen, (req, res) => {
         coins: prices.startingCoins,
         coinsEarnedTotal: 0,
         collectedCoins: {},
-        bountiesPaid: 0,
+        adventureProgress: {},    // which levels of each adventure you've beaten
         createdAt: now,
         updatedAt: now,
       };

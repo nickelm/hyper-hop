@@ -46,7 +46,37 @@ fs.appendFileSync(path.join(TMP, "main.js"),
   "\nexport { startLevel, leaveGame, parseLevel, draw, jump, stepPhysics, drainSimEvents, simState, gameView, FIXED_DT,\n" +
   "         CONFIG,\n" +
   "         openSkinEditor, buildMenu, buildLoginPicker, showLogin, updateMenuBar, openLeaderboard,\n" +
-  "         showScreen, openNewLevel, openLevelForEdit };\n");
+  "         showScreen, openNewLevel, openLevelForEdit, openAdventures, setLevels, showTab };\n");
+
+/* ---------------- Does every button actually exist? ----------------
+   The pretend browser below answers EVERY question with a stand-in, so
+   document.getElementById("typoo") looks like it worked. That is the one
+   blind spot in this whole test — and it's an easy mistake to make when
+   you add a button. So before we run anything, we simply read the real
+   index.html and check that every id the code asks for is really in it. */
+function checkEveryIdExists() {
+  const html = fs.readFileSync(path.join(ROOT, "public", "index.html"), "utf8");
+  const inPage = new Set([...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]));
+  const missing = [];
+  (function walk(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const here = path.join(dir, entry.name);
+      if (entry.isDirectory()) { walk(here); continue; }
+      if (!here.endsWith(".js")) continue;
+      const code = fs.readFileSync(here, "utf8");
+      for (const m of code.matchAll(/getElementById\("([^"]+)"\)/g)) {
+        if (!inPage.has(m[1])) missing.push('"' + m[1] + '" (asked for in ' + path.relative(ROOT, here) + ")");
+      }
+    }
+  })(SRC);
+  if (missing.length) {
+    console.log("These parts of the page don't exist:\n  " + missing.join("\n  "));
+    console.log("\nEither the id is spelled wrong, or index.html is missing that button.");
+    process.exit(1);
+  }
+  console.log("ok  every part of the page the code asks for really exists");
+}
+checkEveryIdExists();
 
 // ---------- a pretend browser ----------
 // Every browser thing (the page, the canvas, sound, saving) becomes a
@@ -112,11 +142,33 @@ const FAKE_ME = {
   collectedCoins: { 1: ["3,1"] },
   looks: [{ skin: FAKE_SKIN, name: "", from: "shop" },
           { skin: FAKE_CROW, name: "The Crow", from: "level" }],
-  powers: ["level.create", "level.editOwn", "level.deleteOwn", "me.edit", "run.report",
-           "level.editAny", "level.deleteAny", "level.reorder", "account.editAny"],
+  powers: ["level.create", "level.editOwn", "level.deleteOwn", "level.publishOwn",
+           "level.bountyOwn", "level.star", "me.edit", "run.report",
+           "level.editAny", "level.deleteAny", "level.hide", "level.publishFree",
+           "adventure.manage", "level.reorder", "level.publishAny", "account.editAny"],
 };
-const FAKE_PRICES = { startingCoins: 50, coinValue: 1, levelCreateBounty: 25, maxCoinsPerLevel: 25,
+const FAKE_PRICES = { startingCoins: 50, coinValue: 1, maxCoinsPerLevel: 25,
+  publishFee: 15, bountyMin: 5, bountyMax: 100, bountySlots: 3,
   skin: { bodyColor: 5, outlineColor: 5, faceColor: 5, shape: 20, face: 10, emoji: 15, trail: 25, explosion: 25 } };
+// The levels the pretend server hands out: one published (with a look, a
+// prize on it and some stars) and one still a draft, so the menu really
+// draws the star button, the bounty badge, the Draft chip and Publish.
+const FAKE_LEVELS = [
+  { id: 1, name: "Turbo Canyon", author: "Test", ownerId: 1, level: "..*..|",
+    song: 0, theme: 0, status: "listed", starCount: 3, starredByMe: true,
+    bounty: { amountPer: 20, slotsLeft: 2, claimedBy: [7] },
+    createdAt: "2026-07-01T10:00:00.000Z",
+    reward: { name: "The Crow", skin: FAKE_CROW }, rules: { GRAVITY: 9000 } },
+  { id: 2, name: "Sleepy Swamp", author: "Test", ownerId: 1, level: "..|",
+    song: 1, theme: 2, status: "draft", starCount: 0, starredByMe: false,
+    bounty: null, createdAt: "2026-07-02T10:00:00.000Z" },
+];
+// One adventure, part-way through: the first level beaten, the second one
+// the frontier, the third still locked.
+const FAKE_ADVENTURES = [
+  { id: 1, name: "First Journey", levelIds: [1, 2], createdBy: 1,
+    playableIds: [1], completed: [1], frontier: 1, score: 1, total: 2 },
+];
 
 function reply(data, status = 200) {
   return Promise.resolve({
@@ -135,14 +187,22 @@ setGlobal("fetch", (url) => {
   if (at("/login"))       return reply(FAKE_ME);
   if (at("/set-password")) return reply(FAKE_ME);
   if (at("/logout"))      return reply({ ok: true });
-  if (at("/levels"))      return reply([{ id: 1, name: "Level One", author: "Test", ownerId: 1,
-                                          level: "..*..|", song: 0, theme: 0,
-                                          reward: { name: "The Crow", skin: FAKE_CROW },
-                                          rules: { GRAVITY: 9000 } }]);
+  if (at("/levels"))      return reply(FAKE_LEVELS);
   if (at("/scores"))      return reply([{ levelId: 1, accountId: 1, player: "Test", percent: 100 }]);
   if (at("/prices"))      return reply(FAKE_PRICES);
+  if (at("/words"))       return reply({ adjectives: ["Turbo", "Wobbly"], nouns: ["Canyon", "Maze"] });
+  if (at("/stars"))       return reply({ starred: true, starCount: 4 });
+  // "/adventures/1/board" as well as "/adventures" — the board answer is
+  // an object where the list is a list, which is the whole point of this
+  // stub being shaped like the real thing.
+  if (u.includes("/adventures/") && u.endsWith("/board")) {
+    return reply({ id: 1, name: "First Journey", total: 2,
+      board: [{ id: 1, name: "Test", skin: FAKE_SKIN, score: 1, total: 2, rank: 1 }] });
+  }
+  if (at("/adventures")) return reply(FAKE_ADVENTURES);
   if (at("/leaderboard")) return reply([{ id: 1, name: "Test", skin: FAKE_SKIN, coinsEarnedTotal: 120 }]);
   if (at("/runs"))        return reply({ credited: 2, balance: 52, coinsEarnedTotal: 122,
+                                         bounty: 20,
                                          unlocked: { name: "The Crow", skin: FAKE_CROW } });
   return reply([]);
 });
@@ -215,14 +275,40 @@ const DIE_LEVEL = "...................^.......^....###...###....o......^^...##..
     check("...and are handed back when you leave",
       () => { if (game.CONFIG.GRAVITY !== normalGravity) throw new Error("GRAVITY stayed at " + game.CONFIG.GRAVITY); });
 
-    check("the menu builds", () => game.buildMenu([
-      { id: 1, name: "Level One", author: "kid", ownerId: 1, level: "..|", song: 0, theme: 0 },
-      { id: 2, name: "Level Two", author: "kid", ownerId: 2, level: "..|", song: 1, theme: 2 },
+    // The menu list, with one of everything on it: a published level, a
+    // draft that only its owner sees, somebody else's level, a level with
+    // a look, one with stars and one with a prize on it. Every button on
+    // a level row gets drawn at least once.
+    const MENU_LEVELS = [
+      { id: 1, name: "Bouncy Alley", author: "kid", ownerId: 1, level: "..|", song: 0, theme: 0,
+        status: "listed", starCount: 2, starredByMe: false, createdAt: "2026-07-01T00:00:00.000Z",
+        bounty: { amountPer: 20, slotsLeft: 2, claimedBy: [] } },
+      { id: 2, name: "Frozen Rush", author: "kid", ownerId: 2, level: "..|", song: 1, theme: 2,
+        status: "listed", starCount: 5, starredByMe: true, createdAt: "2026-07-02T00:00:00.000Z" },
       // one that carries a look, so the 🎭 / 🔒 line on the button is drawn too
       { id: 3, name: "The Crow Flies", author: "kid", ownerId: 1, level: "..|", song: 0, theme: 0,
+        status: "listed", starCount: 0, createdAt: "2026-07-03T00:00:00.000Z",
         reward: { name: "The Crow", skin: FAKE_CROW } },
-    ]));
+      // ...a draft of my own (the ⇧ Publish button)...
+      { id: 4, name: "Sneaky Maze", author: "kid", ownerId: 1, level: "..|", song: 0, theme: 0,
+        status: "draft", starCount: 0, createdAt: "2026-07-04T00:00:00.000Z" },
+      // ...and one a curator has taken off the list.
+      { id: 5, name: "Wobbly Tower", author: "kid", ownerId: 1, level: "..|", song: 0, theme: 0,
+        status: "hidden", starCount: 1, createdAt: "2026-07-05T00:00:00.000Z" },
+    ];
+    check("the menu builds", () => game.buildMenu(MENU_LEVELS));
+    // ...and again through every tab and every way of sorting, because
+    // each one draws a different set of buttons. ("Order" is the only one
+    // with the ▲▼ on it, "mine" is the only one showing drafts.)
+    check("every tab and sort draws", () => {
+      game.setLevels(MENU_LEVELS);
+      for (const tab of ["new", "mine"]) {
+        for (const sort of ["newest", "stars", "bounty", "order"]) game.showTab(tab, sort);
+      }
+      game.showTab("new", "newest");
+    });
     check("the menu bar builds (your cube + purse)", () => game.updateMenuBar());
+    check("the adventures screen opens", () => game.openAdventures());
     check("the login screen builds", () => game.buildLoginPicker());
     check("the trophy board opens", () => game.openLeaderboard());
     check("screens switch", () => {

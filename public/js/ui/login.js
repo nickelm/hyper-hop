@@ -35,6 +35,9 @@ export function initLogin(options) {
   deps = options;      // { showScreen, onLoggedIn, onLoggedOut }
   // If any request anywhere is told "I don't know you", come back here.
   setLoggedOutHandler(() => { me = null; showLogin(); });
+  // Typing in the search box re-draws the cubes as you go.
+  const searchBox = document.getElementById("accountSearch");
+  if (searchBox) searchBox.oninput = () => buildLoginPicker();
 }
 
 export function currentAccount() { return me; }
@@ -46,6 +49,8 @@ export function currentAccount() { return me; }
 // Show the login screen and (re)fill it with everybody's cubes.
 export function showLogin() {
   deps.showScreen("loginScreen");
+  const searchBox = document.getElementById("accountSearch");
+  if (searchBox) searchBox.value = "";     // start fresh, not on yesterday's search
   buildLoginPicker();
 }
 
@@ -56,33 +61,76 @@ function renderCube(canvas, skin) {
   drawPlayer(c, canvas.width / 2, canvas.height / 2, 0, normalizeSkin(skin), canvas.width * 0.62);
 }
 
-// Build the row of "tap your name" buttons.
+/* ----------------------------------------------------------------
+   TOO MANY CUBES TO TAP. With four players a row of cubes is perfect.
+   With twenty-five it's a wall you have to read through every time.
+
+   So we show the ones most likely to be you — whoever used this tablet
+   last, then whoever has played most recently — and there's a search
+   box for everybody else. Type two letters and your cube appears.
+   ---------------------------------------------------------------- */
+const SHOW_AT_MOST = 8;          // how many cubes to show before you search
+
+// One cube button.
+function accountButton(account, favourite) {
+  const btn = document.createElement("button");
+  btn.className = "profileBtn" + (account.name.toLowerCase() === favourite ? " selected" : "");
+  const cv = document.createElement("canvas");
+  cv.width = 56; cv.height = 56;
+  btn.appendChild(cv);
+  renderCube(cv, account.skin);
+  const nm = document.createElement("div");
+  nm.className = "pName";
+  nm.textContent = account.name;
+  btn.appendChild(nm);
+  // A player nobody has claimed yet gets a little hint.
+  if (!account.hasPassword) {
+    const hint = document.createElement("div");
+    hint.className = "pHint";
+    hint.textContent = "tap to claim";
+    btn.appendChild(hint);
+  }
+  btn.onclick = () => tapAccount(account);
+  return btn;
+}
+
+// Whoever is most likely to be sitting here: this tablet's last player
+// first, then everybody else newest-first.
+function mostLikely(favourite) {
+  return [...accounts].sort((a, b) => {
+    const aMine = a.name.toLowerCase() === favourite ? 1 : 0;
+    const bMine = b.name.toLowerCase() === favourite ? 1 : 0;
+    if (aMine !== bMine) return bMine - aMine;
+    return (Date.parse(b.updatedAt || 0) || 0) - (Date.parse(a.updatedAt || 0) || 0);
+  });
+}
+
+// Build the row of "tap your name" buttons, filtered by whatever has
+// been typed in the search box.
 export function buildLoginPicker() {
   const row = document.getElementById("accountRow");
   if (!row) return;
   row.innerHTML = "";
 
   const favourite = lastAccountName().toLowerCase();
-  for (const account of accounts) {
-    const btn = document.createElement("button");
-    btn.className = "profileBtn" + (account.name.toLowerCase() === favourite ? " selected" : "");
-    const cv = document.createElement("canvas");
-    cv.width = 56; cv.height = 56;
-    btn.appendChild(cv);
-    renderCube(cv, account.skin);
-    const nm = document.createElement("div");
-    nm.className = "pName";
-    nm.textContent = account.name;
-    btn.appendChild(nm);
-    // A player nobody has claimed yet gets a little hint.
-    if (!account.hasPassword) {
-      const hint = document.createElement("div");
-      hint.className = "pHint";
-      hint.textContent = "tap to claim";
-      btn.appendChild(hint);
-    }
-    btn.onclick = () => tapAccount(account);
-    row.appendChild(btn);
+  const searchBox = document.getElementById("accountSearch");
+  // String(...) on purpose: a real box always hands back a string, but the
+  // boot test's pretend browser hands back a stand-in, and .includes()
+  // throws on anything that might be a regular expression.
+  const looking = String((searchBox && searchBox.value) || "").trim().toLowerCase();
+
+  // Searching shows every match; not searching shows the likeliest few.
+  const matches = looking
+    ? accounts.filter(a => a.name.toLowerCase().includes(looking))
+    : mostLikely(favourite).slice(0, SHOW_AT_MOST);
+
+  for (const account of matches) row.appendChild(accountButton(account, favourite));
+
+  if (looking && !matches.length) {
+    const none = document.createElement("div");
+    none.className = "pNone";
+    none.textContent = "Nobody called that — check the spelling, or make a new player.";
+    row.appendChild(none);
   }
 
   const add = document.createElement("button");
@@ -90,6 +138,18 @@ export function buildLoginPicker() {
   add.innerHTML = "＋<div class='pName'>New player</div>";
   add.onclick = () => newAccount();
   row.appendChild(add);
+
+  // The search box only earns its place once there are enough players
+  // that the row doesn't show everybody anyway.
+  const wrap = document.getElementById("accountSearchWrap");
+  if (wrap) wrap.classList.toggle("hidden", accounts.length <= SHOW_AT_MOST);
+  const hint = document.getElementById("accountHint");
+  if (hint) {
+    const hiddenCount = accounts.length - matches.length;
+    hint.textContent = (!looking && hiddenCount > 0)
+      ? "…and " + hiddenCount + " more — type your name to find yourself."
+      : "";
+  }
 }
 
 // Fetch everybody's names and cubes, then draw them.
@@ -224,6 +284,12 @@ export function may(action, thing) {
       return powers.includes("level.editAny") || (powers.includes("level.editOwn") && isMine);
     case "level.delete":
       return powers.includes("level.deleteAny") || (powers.includes("level.deleteOwn") && isMine);
+    case "level.publish":
+      return powers.includes("level.publishAny") || (powers.includes("level.publishOwn") && isMine);
+    // A prize spends the LEVEL OWNER'S coins, so only the owner may put
+    // one up — not a curator, not even an admin.
+    case "level.bounty":
+      return powers.includes("level.bountyOwn") && isMine;
     default:
       return powers.includes(action);
   }

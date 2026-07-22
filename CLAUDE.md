@@ -19,6 +19,11 @@ cosmetic bits for your cube. The security is family-grade — but the fundamenta
 are done properly: hashed passwords, an httpOnly session cookie, and every
 permission checked on the server, never just in the buttons.
 
+Levels have a **life of their own**: you build one privately as a draft, pay a
+small fee to publish it, other people **star** it, a curator gathers the good
+ones into an **adventure**, and you can put a **bounty** on yours for the first
+few people who beat it. See "A level's life" below.
+
 The code is split into small **ES modules** — one job per file, no build step.
 
 ## Non-negotiable conventions
@@ -202,15 +207,29 @@ it every frame. **The ground is drawn column by column inside the world transfor
 (in runs, so there are no seams) rather than as one screen-wide rectangle — that
 is what makes a hole actually look like a hole.
 
+**The editor canvas is a WINDOW onto the level, not the level.** It is only ever
+as big as the box you look through (`#editorGridWrap`), and `drawEditor()` paints
+just the squares inside it, offset by how far you've scrolled. The level's real
+size lives on `#editorGridSpace`, the plain `<div>` behind the canvas: that is
+what makes the box scroll and what `scrollbars.js` measures, and the canvas is
+`position: sticky` so it stays glued to the corner you're looking at. This is why
+a level may be 2000 squares long — a tablet silently draws **nothing** onto a
+canvas much above 8000 pixels, so the old "one canvas, the whole level" could
+never have been zoomed in on a long level (it used to cap `ED.cell` to stay under
+that, which is exactly what made 🔍+ useless on wide levels). It also means
+painting a long level redraws a screenful, not 28,000 squares.
+
 **The editor sizes itself to the tablet.** `ED.cell` is never a fixed number — it
-is worked out each redraw so at zoom 0 the *whole* level fits the space available
-(`fitCell()`), with 🔍−/🔍+ steps on top that go far past that, up to `MAX_CELL`,
-so you can get right in close. This matters because the grid is 14 rows tall and a
-tablet's editor area is only a few hundred pixels. One guard: `computeCell()` also
-caps the cell so the canvas never exceeds `MAX_CANVAS` pixels on its longest side —
-a tablet silently draws **nothing** above that, and a 300-square level zoomed right
-in would otherwise go blank. `zoomBy()` notices when a zoom step changed nothing and
-puts it back, so 🔍− always works on the next tap.
+is worked out each redraw by `cellAtZoom(ED.zoom)`, which spreads the `MAX_ZOOM`
+steps **evenly between two ends**: zoom 0 is "the whole level fits" (`fitCell()`,
+never smaller than `MIN_CELL`) and the last tap is always `MAX_CELL`, big
+comfortable squares. Evenly *between the two ends* is the load-bearing part: it
+used to be "each tap multiplies by 1.3", and on a long level the first several
+taps all rounded to the same size — and `zoomBy()` **put the zoom back** whenever
+a step changed nothing, so you could never climb out of that dead band. (Opening
+an existing wide level for editing landed you straight in it, because
+`edLoadGrid()` resets `ED.zoom` to 0 while the ⏵ Wider button doesn't.) `zoomBy()`
+now keeps stepping until the squares really change size instead.
 
 **A finger on the editor canvas always paints** — dragging draws a whole run of
 blocks, which is the whole point on a touch screen. So `#editorCanvas` keeps
@@ -368,6 +387,153 @@ in normal cube play there is no ceiling at all. Because the grid itself is never
 padded, row indices, `"col,row"` coin keys and stored level strings are unaffected
 — which keeps the client in step with the server's `coinKeysFor()`.
 
+## A level's life
+
+Every level is in one of three places, and it is `status` on the level record:
+
+```
+        make it (FREE)                publish (costs publishFee)
+   ✎  ─────────────────▶  draft  ──────────────────────────────▶  listed
+                            │                                     ▲    │
+                     only you can see it                   unhide │    │ hide
+                                                                  │    ▼
+                                                                 hidden
+```
+
+- **draft** — where a level lives while you're still building it. Free to make,
+  free to change as often as you like, and **nobody else can see it**: a draft is
+  left out of `/api/levels` altogether, so it isn't hidden by the buttons, it
+  never leaves the server. This is the iteration space.
+- **listed** — published. Everybody can see it and play it, and it can go into an
+  adventure. Publishing costs `publishFee` coins and is the **only** thing besides
+  a cube you spend coins on. Too poor? A friendly message says how many more you
+  need, and the level stays safely a draft. **An editor or an admin publishes for
+  free** (`level.publishFree`): the fee exists to make a *kid* stop and think
+  before putting a level in front of everybody, and a grown-up looking after the
+  game is doing a job, not showing off. With nothing to pay, the publish route
+  doesn't touch `accounts.json` at all — so it doesn't churn the backups either.
+- **hidden** — a curator (`level.hide`, so an editor or an admin) took it off the
+  list: broken, impossible, or unkind. It is **not deleted** — its owner still
+  sees it with "🚫 Hidden by a curator" on it, and unhiding puts it straight back.
+
+Publishing is deliberately the thing that costs, not making. Making levels should
+be free and endless; putting one in front of everybody is what should make you
+stop and think. **The old `levelCreateBounty` — coins for making a level — is
+gone**, along with its `bountiesPaid` counter. Nobody's old bounty was clawed
+back; the field is simply never read again.
+
+`visibleTo(level, account)` in `lib/auth.js` is the one place that decides who
+sees what, and `GET /api/levels` filters through it. A level from before all this
+has no `status` and counts as **listed**, so nothing a kid made ever disappeared.
+**A draft is private from everybody, curators included** — there is nothing to
+moderate until it's published, and a half-built level is nobody else's business.
+(That's also why the "that name's taken" message doesn't name the other level
+unless you'd be allowed to see it: otherwise it would tell you what somebody
+else is quietly building.)
+
+**Because nobody ever sees the whole list, reordering works on a *part* of it.**
+`PUT /api/levels/order` takes the ids the tablet can see, in the order it wants
+them, and slots just those levels back into the places they already occupy —
+everything else stays put. It used to demand every level, which meant the ▲▼
+buttons moved the wrong level for an admin (whose list is missing other people's
+drafts) and refused outright for a player given `extraPerms: ["level.reorder"]`.
+Sending a partial list can never lose a level, because only the named ones move.
+
+**One name, one level.** Level names are unique, ignoring capitals — "turbo
+canyon" is the same name as "Turbo Canyon". `checkNameIsFree` in `lib/validate.js`
+enforces it (the levels list and the level's own id are handed *in*, the same way
+`maxCoins` is, because `validate.js` mustn't require `storage.js`). The error says
+which level already has the name.
+
+**The 🎲 dice.** Thinking up a name is the boring bit, so there's a dice button
+beside the name box: it sticks a describing word onto a place word — "Turbo
+Canyon", "Wobbly Dungeon". The two lists live in **`server/lib/words.js`**, once,
+and the tablet fetches them at start-up from `GET /api/words` (`js/names.js`).
+**That file is where you add your own words.** Both sides re-roll if the name is
+taken and give up after 20 tries, adding a number rather than ever failing. A
+brand-new level opens with a rolled name already in the box, and the one-time
+migration renamed every level called "My Level" (there were three).
+
+## Stars
+
+One star per account per level, tappable off again, stored as flat rows in
+`data/stars.json` (`{levelId, accountId, at}` — the same shape as `scores.json`).
+`GET /api/levels` derives `starCount` and `starredByMe` at read time, so nothing
+is kept on the level and a deleted account's star simply stops counting.
+
+Three things stars deliberately are **not**: there is no thumbs-down (somebody
+spent an afternoon on that level; the worst it gets from us is no stars); a star
+is worth **no coins** and never touches `coinsEarnedTotal` or the trophy board;
+and starring your own level is allowed — of course you like it, you made it, and
+policing that would cost more code than it saves.
+
+## Adventures
+
+An **adventure** is a handful of published levels a curator has put in an order,
+with a name on the front. You play them from the start and you can't skip: beat
+one and the next unlocks. `data/adventures.json` holds
+`{id, name, levelIds: [], createdBy, createdAt, updatedAt}`; each account carries
+`adventureProgress: { "<adventureId>": [levelIds] }` — the same shape as
+`collectedCoins`, so finishing a level still touches exactly one file inside one
+`updateJson`.
+
+Two sums decide everything, and both are worked out **fresh every time**
+(`server/lib/adventures.js`). Nothing is stored but the plain set of levels each
+person has beaten, which is what lets a curator rearrange an adventure whenever
+they like:
+
+- **Score** = how many of the adventure's *current* `levelIds` you have beaten.
+  Take a level out and everyone who beat it scores one less; put it back and it
+  returns. Nothing to migrate, because nothing was ever written down.
+- **Frontier** = how many levels from the **start** you have beaten with no gaps.
+  That is also the position of the level you may play next, which is why one
+  number does both jobs. **Inserting a level in the middle snaps everybody's
+  frontier back to it** — that isn't special code, it's just what the rule says.
+
+A level that is deleted or **hidden is skipped**, not a wall: `playableIds` leaves
+it out, so one hidden level can never make an adventure impossible. The UI draws
+✓ / ▶ / 🔒 from this, and `mayPlay` in `routes/runs.js` checks it again for real —
+telling the server you finished level five doesn't count if you were only allowed
+as far as level two.
+
+Finishing a level inside an adventure pays **exactly** what it pays standalone;
+the once-per-coin rule already stops farming. The adventure's score board ranks
+everybody by score with **ties sharing a rank** (two people on four levels are
+both 2nd, and the next is 4th).
+
+## Bounties
+
+A **bounty** is a prize you put on your own published level: "the first three
+people to beat this get 20 coins each". It lives on the level record as
+`bounty: { amountPer, slotsLeft, claimedBy: [] }`, and `server/lib/bounties.js` is
+the only place that decides anything about it.
+
+**You pay for every slot the moment you set it up** (`amountPer * bountySlots`
+leaves your purse into escrow on the level). That's the whole point: the prize is
+really there, nobody can promise coins they haven't got — and it's why a bounty
+**cannot be cancelled**, so nobody can pull the prize after somebody has nearly
+won it. One live bounty per level; you may put up another once it's been won.
+Hiding or deleting the level **refunds** whatever nobody won, as plain coins that
+do *not* count as newly earned (they were yours already).
+
+Three rules are baked into `claimBountySlot`: **you can never win your own**
+(and your completion doesn't use up a slot), the same person can never win twice,
+and when the slots run out the bounty is over.
+
+**The ordering in `routes/runs.js` is load-bearing.** Claiming a slot and paying
+for it are two separate saves:
+
+```js
+const bountyWon = claimBountySlot(levelId, req.account.id);   // writes levels.json
+const result = updateJson(ACCOUNTS_FILE, accounts => { … credited + bountyWon … });
+```
+
+There must be **no `await` between them**. Both are synchronous read-modify-writes,
+so two tablets finishing at the very same moment are dealt with one after the
+other and exactly one of them gets the last prize. An `await` in the middle
+reopens that gap and they could both win it —
+`test/api.js` races two tablets for the last slot to keep this honest.
+
 ## A level's own rules
 
 A level may **bend some of the game's numbers while you are inside it** — moon
@@ -434,8 +600,9 @@ able to bend means adding it to BOTH** `LEVEL_RULES` (client) and
 | `index.html` | Markup + styles only. One `<script type="module" src="js/main.js">`. No inline JS. |
 | `js/config.js` | `CONFIG` (every tunable number), `DEFAULTS`, `THEMES`, and the cube-skin option lists. The kids' control panel. |
 | `js/rules.js` | Which of those numbers a **level** may bend, and the borrowing that makes it happen: `LEVEL_RULES`, `applyLevelRules`, `clearLevelRules`, `countRules`. |
-| `js/main.js` | The app shell: game state, starting/resetting a level, checkpoints, the game loop, the menu + player picker, and startup. Wires every other module together. |
-| `js/api.js` | Every `fetch`: `apiGet`, `apiWrite` (family PIN + one retry), `apiPost` (scores, no PIN). Owns the PIN and the PIN / "are you sure?" pop-ups. |
+| `js/main.js` | The app shell: game state, starting/resetting a level, checkpoints, the game loop, and startup. Wires every other module together. |
+| `js/api.js` | Every `fetch`: `apiGet`, `apiWrite`, `apiPost`, `apiDelete`, and the "are you sure?" pop-up. |
+| `js/names.js` | The 🎲 dice: fetches the word lists from `/api/words` and rolls a level name nobody is using. |
 | `js/input.js` | Taps and keys → actions: jump, hold-to-keep-jumping, reporting held-ness (`setHolding`, for flight), Escape, Z/X checkpoints, in-game buttons. |
 | `js/music.js` | The chiptune synth (`Music`) and the `SONGS` list. |
 | `js/game/level.js` | The level format: `parseLevel`, the tile legend, and the `tileAt` / `cellTop` / `skyTop` / `worldBottom` / `groundSpans` lookups. |
@@ -443,7 +610,9 @@ able to bend means adding it to BOTH** `LEVEL_RULES` (client) and
 | `js/game/render.js` | Drawing a frame: sky, ground, every tile, HUD, and the win/death overlays. |
 | `js/game/player.js` | How a cube *looks*: `drawPlayer`, `normalizeSkin`, `hslToHex`. Shared by the game, the previews and the picker buttons. |
 | `js/game/effects.js` | The trail and the death explosion (`drawTrail`, `spawnExplosion`, `renderParticles`). |
-| `js/ui/editor.js` | The level editor: paint grid, palette, tune/theme/🎭-look/⚙-rules buttons, zoom, signs, test-play, copy/paste, save. |
+| `js/ui/menu.js` | **The front page:** the level list, the New/My tabs, the four sorts, and every button on a level — play, ⭐ star, 📊 scores, ⇧ publish, 💰 prize, hide, edit, delete, ▲▼. |
+| `js/ui/adventures.js` | The adventures screen: the list, one adventure's ✓/▶/🔒 levels and score board, and a curator's add/remove/reorder. |
+| `js/ui/editor.js` | The level editor: paint grid, palette, 🎲 name dice, tune/theme/🎭-look/⚙-rules buttons, zoom, signs, test-play, copy/paste, save. |
 | `js/ui/scrollbars.js` | Scroll bars you can drag with a finger (the editor's grid). Knows nothing about levels. |
 | `js/ui/skins.js` | The cube editor, its live-preview cube, the **My Looks** row — and, in `forLevel` mode, designing the look a level is played as. |
 | `js/ui/settings.js` | The ⚙ Settings panel — **sound and comfort only** (volume, music, beat pulse, trail, screen shake), just for this tablet, saved nowhere. |
@@ -456,9 +625,12 @@ able to bend means adding it to BOTH** `LEVEL_RULES` (client) and
 | ---- | ------------ |
 | `server.js` | Bootstrap: env vars, static files, mounts the routers, the JSON 404/error handlers, starts listening. |
 | `routes/auth.js` | `/api/me`, `/api/accounts` (list + signup), `/api/login`, `/api/set-password`, `/api/logout`. Owns the 5-tries lockout. |
-| `routes/levels.js` | `/api/levels` — list, create (+ bounty), reorder, update, delete. |
+| `routes/levels.js` | `/api/levels` — list (filtered by who you are), create a draft, publish, hide/unhide, put up a prize, reorder, update, delete. |
 | `routes/accounts.js` | `/api/accounts/:id` — change your name/cube. **This is the shop:** it prices what changed and takes the coins. |
-| `routes/runs.js` | `/api/runs` — "I finished a level with these coins" → coins credited, and the level's look handed over. |
+| `routes/runs.js` | `/api/runs` — "I finished a level with these coins" → coins credited, the level's look handed over, a bounty claimed, and an adventure moved along. |
+| `routes/stars.js` | `/api/stars` — ⭐ on and off. |
+| `routes/adventures.js` | `/api/adventures` — the campaigns and their score boards. |
+| `routes/words.js` | `/api/words` — the words the 🎲 dice picks from. |
 | `routes/scores.js` | `/api/scores` — best % per player per level. |
 | `routes/leaderboard.js` | `/api/leaderboard` — everyone ranked by coins earned ever. |
 | `routes/prices.js` | `/api/prices` — the shop price list, so the Save button can show a price. |
@@ -470,19 +642,31 @@ able to bend means adding it to BOTH** `LEVEL_RULES` (client) and
 | `lib/cookies.js` | Reading and writing the login cookie by hand (httpOnly, SameSite=Lax). |
 | `lib/prices.js` | The price list, re-read whenever `data/prices.json` changes on disk. |
 | `lib/looks.js` | **What cubes you own** ("My Looks"): `sameSkin`, `looksOf`, `ownsLook`, `addLook`. The shop and the runs route both ask here. |
-| `lib/migrate.js` | The one-time move from the old `profiles.json` to `accounts.json`. |
+| `lib/bounties.js` | The prize on a level: `makeBounty`, `isLive`, `claimBountySlot`, `takeBackEscrow`. The only place that decides who wins one. |
+| `lib/adventures.js` | How far you've got: `playableIds`, `scoreOf`, `frontierOf`, `mayPlay`. Pure sums, worked out fresh every time. |
+| `lib/words.js` | **The 🎲 word lists — add your own words here** — and `randomLevelName(taken)`. |
+| `lib/migrate.js` | The one-time tidy-ups: `profiles.json` → `accounts.json`, and every old level joining the draft/listed/hidden lifecycle. |
 | `lib/errors.js` | `NotFound` (404) and `NotAllowed` (403), so routes can `throw` and still answer properly. |
 
 **Other:**
 
 - `data/` — runtime state, created/seeded on first run and **gitignored**:
-  - `levels.json` — `{id, name, author, level, song, theme, messages, reward, rules, ownerId, updatedAt}`.
+  - `levels.json` — `{id, name, author, level, song, theme, messages, reward, rules,
+    ownerId, status, bounty, createdAt, updatedAt}`.
     Array order is the play order (changed via the reorder endpoint). `ownerId` is
     who may edit it; `null` means admin-only (the built-in levels). `messages` is
     the level's signs (`{"col,row": "words"}`) and is missing on older levels.
     `reward` is the look this level is played as and gives you for finishing it
     (`{name, skin}`, or null) — see "My Looks" under Skins. `rules` is the numbers
     this level bends (`{"GRAVITY": 1500}`, or `{}`) — see "A level's own rules".
+    `status` is `draft` / `listed` / `hidden` and `bounty` is the prize on it
+    (`{amountPer, slotsLeft, claimedBy}`, or null) — see "A level's life".
+    **`name` is unique across every level, ignoring capitals.** `starCount` and
+    `starredByMe` are *not* stored: they're worked out when the list is read.
+  - `stars.json` — `{levelId, accountId, at}`: who liked what. One row per
+    (level, account); tapping ⭐ again removes the row.
+  - `adventures.json` — `{id, name, levelIds, createdBy, createdAt, updatedAt}`:
+    a curated journey through some published levels. See "Adventures".
   - `scores.json` — `{levelId, accountId, player, percent, updatedAt}`: each
     player's **best % completion** per level (100 = finished). One row per
     (level, player); the server keeps the max. `accountId` may be `null` on rows
@@ -492,8 +676,13 @@ able to bend means adding it to BOTH** `LEVEL_RULES` (client) and
     never the token itself, so an old backup is not a pile of working keys.
   - `prices.json` — **the coin control panel.** Hand-edit it and the shop notices
     immediately, no restart.
-  - `meta.json` — the game's own notes: `nextLevelId` (never reused) and when the
-    one-time move to accounts happened.
+  - `meta.json` — the game's own notes: the counters `nextLevelId` and
+    `nextAdventureId` (**never reused, even after a delete** — everybody's
+    `collectedCoins` and `adventureProgress` are remembered against those
+    numbers, so a recycled one would hand a brand-new thing somebody else's
+    history), and when each one-time tidy-up happened
+    (`migratedFromProfilesAt`, `levelsUpgradedAt`). Those two dates are the
+    gates: delete one and that tidy-up runs again.
   - `profiles.json.migrated` — the old players file, kept but never read again.
   - `backups/` — timestamped copies of the above, newest 200 kept per file.
 - `test/` — the safety net (see Testing below).
@@ -567,7 +756,7 @@ these are 9-year-olds). A row in `accounts.json` looks like:
   skin: {...}, coins, coinsEarnedTotal,
   collectedCoins: { "<levelId>": ["col,row", ...] },   // coins already paid for
   looks: [ { skin, name, from } ],                     // every cube you own (My Looks)
-  bountiesPaid,                                        // how many level bounties earned
+  adventureProgress: { "<adventureId>": [levelIds] },  // which levels you've beaten
   createdAt, updatedAt }
 ```
 
@@ -582,9 +771,14 @@ for it.
 
 | role | may |
 | ---- | --- |
-| `player` | make levels; edit/delete **their own**; edit their own name + cube; report runs |
-| `editor` | everything a player may, plus edit/delete **anybody's** level |
-| `admin` | everything an editor may, plus reordering levels and editing any account |
+| `player` | make levels; edit/delete/**publish** their own; put a **prize** on their own published level; ⭐ star anything; edit their own name + cube; report runs |
+| `editor` | everything a player may, plus edit/delete **anybody's** level, **hide/unhide** any level, publish **without paying the fee**, and look after the **adventures** |
+| `admin` | everything an editor may, plus reordering levels, publishing anybody's level, and editing any account |
+
+Two of those are deliberately owner-only, however important your job is.
+**Publishing** spends the owner's coins, and **putting up a prize** spends them
+too — so `can(…, "level.bounty")` is `bountyOwn && isMine` with no "any" version
+at all. Nobody gets to spend somebody else's purse.
 
 `extraPerms` is a list of extra powers for one person, so you can give a kid
 `"level.reorder"` without making them a full admin. **`lib/auth.js` is the only
@@ -599,9 +793,12 @@ already been paid for, then credits the difference. So:
 - Coins pay **once**. Replaying a level is still fun, but the coins you've already
   earned draw **silver** and add nothing.
 - Finishing matters: an unfinished run credits nothing (and writes nothing).
-- Making a **brand-new** level pays `levelCreateBounty`. This is counted, not
-  listed by id: you're paid when you own more levels than you've been paid for —
-  so making a level, deleting it and making it again earns nothing.
+- Making a level is **free**; **publishing** one costs `publishFee` — unless you
+  are an editor or an admin, who publish for nothing. (Making one used to *pay* a
+  bounty. That's gone — see "A level's life".)
+- Beating a level that has a **bounty** on it pays `amountPer`, to the first
+  `bountySlots` different people, never the owner. Those coins *do* count as
+  earned, so a bounty lifts you up the trophy board.
 - A level may hold at most `maxCoinsPerLevel` coins, so a level can't be turned
   into a coin machine. The editor keeps you inside it; the server checks it too.
 - The **trophy board** ranks by `coinsEarnedTotal` (lifetime earnings), never by
@@ -620,11 +817,16 @@ The Save button shows the live price ("Save — 45 coins") and goes to
 `data/prices.json` and picked up without a restart:
 
 ```
-{ "startingCoins": 50, "coinValue": 1, "levelCreateBounty": 25,
+{ "startingCoins": 50, "coinValue": 1,
   "maxCoinsPerLevel": 25,
+  "publishFee": 15,                                    // what showing a level costs
+  "bountyMin": 5, "bountyMax": 100, "bountySlots": 3,  // the prizes you may put up
   "skin": { "bodyColor": 5, "outlineColor": 5, "faceColor": 5,
             "shape": 20, "face": 10, "emoji": 15, "trail": 25, "explosion": 25 } }
 ```
+
+A `levelCreateBounty` left over in an existing `prices.json` is simply never read
+any more; deleting the line is tidy but optional.
 
 **A trap worth knowing about.** `validateAccountEdit` returns a *patch* (only the
 fields that were sent) and the route **merges** it onto the saved account. It used
@@ -735,14 +937,24 @@ with a friendly 403 when `READ_ONLY=true`.
 | POST   | `/api/set-password` | anyone             | claim a name that has no password yet  |
 | POST   | `/api/logout`       | anyone             | forget this login                      |
 | PUT    | `/api/accounts/:id` | yourself / admin   | change your name and/or cube — **this is the shop** |
-| GET    | `/api/levels`       | anyone             | all levels                            |
-| POST   | `/api/levels`       | `level.create`     | create a level (+ the new-level bounty) |
-| PUT    | `/api/levels/order` | `level.reorder`    | reorder all levels (send `{order:[ids]}`) |
-| PUT    | `/api/levels/:id`   | owner / editor     | update a level                        |
-| DELETE | `/api/levels/:id`   | owner / editor     | delete a level                        |
+| GET    | `/api/levels`       | anyone             | the levels **you're allowed to see** (+ `starCount`, `starredByMe`) |
+| POST   | `/api/levels`       | `level.create`     | create a level — as a **draft**, free  |
+| POST   | `/api/levels/:id/publish` | owner        | pay `publishFee` and list it for everybody |
+| POST   | `/api/levels/:id/hide` / `/unhide` | `level.hide` | take a level off the list, or put it back |
+| POST   | `/api/levels/:id/bounty` | owner         | `{amountPer}` → pay for the prizes up front |
+| PUT    | `/api/levels/order` | `level.reorder`    | reorder (send `{order:[ids]}` — **just the ones you can see**) |
+| PUT    | `/api/levels/:id`   | owner / editor     | update a level (never its status or prize) |
+| DELETE | `/api/levels/:id`   | owner / editor     | delete a level (unwon prize money refunded) |
+| POST   | `/api/stars/:levelId` | `level.star`     | ⭐ on/off → `{starred, starCount}`      |
+| GET    | `/api/adventures`   | anyone             | every adventure, with **your** progress |
+| GET    | `/api/adventures/:id/board` | anyone     | everybody ranked, ties sharing a rank  |
+| POST   | `/api/adventures`   | `adventure.manage` | make one                              |
+| PUT    | `/api/adventures/:id` | `adventure.manage` | rename it, or set its `levelIds` (reorder = a new order) |
+| DELETE | `/api/adventures/:id` | `adventure.manage` | delete it (the levels are untouched) |
+| GET    | `/api/words`        | anyone             | the words the 🎲 dice picks from       |
 | GET    | `/api/scores`       | anyone             | all high scores                       |
 | POST   | `/api/scores`       | logged in          | save a `{levelId, percent}` best (see note) |
-| POST   | `/api/runs`         | logged in          | `{levelId, collectedCoinKeys, completed}` → `{credited, unlocked, balance}` |
+| POST   | `/api/runs`         | logged in          | `{levelId, collectedCoinKeys, completed, adventureId?}` → `{credited, unlocked, bounty, balance}` |
 | GET    | `/api/leaderboard`  | anyone             | everyone ranked by coins earned ever   |
 | GET    | `/api/prices`       | anyone             | the shop price list                    |
 
@@ -762,7 +974,10 @@ password give the *same* message, so guessing can't discover who exists.
 
 Server-side level validation (`lib/validate.js`, returns clear messages): only the
 characters `. # ^ v o * | / \ L 7 = - p U s @ ! > < u n f c h g`, all rows equal length,
-at most one `|`, ≤ 500 columns, ≤ 30 rows, and at most `maxCoinsPerLevel` coins.
+at most one `|`, ≤ `MAX_COLS` columns (2000 — about three and a half minutes of
+running; the tablet knows the same number as `CONFIG.MAX_LEVEL_COLS`, so the
+⏵ Wider button stops politely instead of the save failing), ≤ 30 rows, and at
+most `maxCoinsPerLevel` coins.
 The allowed-character list is defined
 **once** (`LEVEL_CHARS`) and the error message is generated from it, so the two
 can't drift. The coin limit is handed **in** (`validateLevel(body, { maxCoins })`,
@@ -794,7 +1009,7 @@ only one side would appear to work and then vanish on save. Everything else in
 
 ## Testing
 
-Two automatic checks, both run by `npm test`:
+Three automatic checks, all run by `npm test`:
 
 - **`test/golden.js` — did the physics change?** Replays fixture levels through the
   real physics with a fixed jump script (`jumpAt`) and, for the flying levels, a
@@ -823,6 +1038,28 @@ Two automatic checks, both run by `npm test`:
   browser a pop-up promise never resolves, so an awaited login prompt at start-up
   would hang forever *and* look like a pass.
 
+  It starts with `checkEveryIdExists()`, which is not about running anything: it
+  reads the real `index.html` and checks that every id the code asks
+  `getElementById` for is really in the page. That is the pretend browser's one
+  blind spot — it answers *every* question with a stand-in, so a typo'd id looks
+  like it worked — and it is exactly the mistake you make when adding a button.
+
+  Two things the pretend browser can't do, which shaped the code: its stand-in
+  isn't a list, so `querySelectorAll` results must go through `Array.from(...)`
+  (see `chipsIn` in `menu.js`); and it isn't a string, so anything going into
+  `.includes()` needs an explicit `String(...)` (see the search box in `login.js`).
+
+- **`test/api.js` — does the SERVER still play fair?** Starts a real server on a
+  spare port with a brand-new **empty data folder of its own** (`HH_DATA_DIR`, which
+  exists for exactly this reason) and plays several tablets against each other. It
+  covers the rules that involve other people and their coins: a draft is invisible
+  to everybody else, publishing charges once and no more, a name can't be used
+  twice, ⭐ toggles, an adventure unlocks one level at a time and re-scores itself
+  when a curator edits it, and the bounty rules — including **two tablets racing
+  for the last slot, where exactly one must be paid**. Then it runs the whole thing
+  again in a fresh process with `READ_ONLY=true` to check that frozen really means
+  frozen and that logging in still works. Your real `data/` is never touched.
+
 ## Workflow
 
 - Run locally with `npm install` then `npm start`, and open
@@ -832,9 +1069,11 @@ Two automatic checks, both run by `npm test`:
   time (or for a name that came across from the old players file) it asks them to
   **pick** a password instead. A login lasts 90 days and survives a server restart.
 - Kids build levels in the in-game editor and tap **Save to server** (it asks for a
-  name + author once). Tuning is per level now — the editor's **⚙ Rules** button —
-  and rides along with the level when it's saved. Everything persists server-side
-  and is backed up automatically — no git round-trip needed.
+  name + author once). That saves a **draft**, which is free and which only they
+  can see — they iterate on it as long as they like, then tap **⇧ Publish** on the
+  menu to spend `publishFee` coins and show it to everybody. Tuning is per level —
+  the editor's **⚙ Rules** button — and rides along with the level when it's saved.
+  Everything persists server-side and is backed up automatically.
 - **Changing the game's numbers for real** (the ones a level can't bend, or the
   starting point every level plays from) is a grown-up job done by editing
   `public/js/config.js` and reloading. There is no button for it on purpose.
@@ -842,10 +1081,21 @@ Two automatic checks, both run by `npm test`:
   server re-reads these files as it goes (the person should reload the page to see
   their new buttons, but the server enforces the change immediately):
   - give somebody a different job → change their `"role"` in `accounts.json`
-    (`player` / `editor` / `admin`), or add one power to `"extraPerms"`;
+    (`player` / `editor` / `admin`), or add one power to `"extraPerms"`. An
+    `editor` is the **curator**: they can take a bad level off the list and they
+    look after the adventures;
+  - add words to the 🎲 dice → edit `server/lib/words.js` (this one *does* want a
+    restart — it's code, not data);
   - change what things cost → edit `prices.json`;
-  - forgotten password → set that account's `"passwordHash"` back to `null` and
-    they can claim it again with a new one.
+  - **forgotten password → set that account's `"passwordHash"` to `null` in
+    `data/accounts.json`.** That's the whole procedure, and it needs **no
+    restart**: `POST /api/login` re-reads `accounts.json` on every single login,
+    so the very next tap on that name says "pick a password so this name is
+    yours" instead of "wrong password". Picking one also logs that account out
+    everywhere else (`destroyAllForAccount`), so an old tablet left logged in
+    doesn't keep the account. Nothing else changes — their levels, coins, looks
+    and scores are all still theirs, and the five-wrong-guesses lockout is
+    untouched. (`test/api.js` checks this end to end.)
 - When the kids are present, explain changes as you make them; small readable
   diffs beat clever refactors.
 
@@ -929,10 +1179,82 @@ Two automatic checks, both run by `npm test`:
   screen shake) — no gravity/jump sliders and no ★ "for everyone" buttons, even
   for an admin. Opening it mid-play on a rules level and tapping **Reset** leaves
   that level's gravity alone. `curl -X PUT .../api/settings` answers 404.
-- Reorder (▲/▼), delete (🗑 with the "are you sure?" pop-up), and **Play All**
-  (adventure mode) all work by touch; reorder/delete persist after a reload.
+- Reorder (▲/▼ — they only appear under the **Order** sort), delete (🗑 with the
+  "are you sure?" pop-up), and **Play All** all work by touch; reorder/delete
+  persist after a reload. ▼ really moves the level **you tapped** past the one
+  below it *on screen* — check this on an account that also has a draft or two,
+  because those are missing from the list and used to make ▲▼ move the wrong
+  level. A `player` given `extraPerms: ["level.reorder"]` can reorder too.
 - `READ_ONLY=true` refuses writes with the friendly message; **logging in and
   reading still work**; balances are unchanged.
+
+**A level's life, stars, adventures and bounties** (mostly covered by
+`test/api.js`, but these are the by-hand, two-tablet versions):
+
+- **Drafts.** Save a new level → the toast says "saved as a draft", it shows on
+  **My levels** with a yellow ✎ Draft chip, and it is **not** on the other
+  tablet's New levels at all — **not even for an editor or an admin**. Play it
+  from your own list: works normally.
+- **The purse doesn't eat your history.** Play a level and collect its coins,
+  go back to the menu, publish a draft (or put up a prize) → replay that level
+  and the coins you already earned are still **silver**, and a look you'd won is
+  still 🎭 rather than 🔒. (Taking coins must only ever change the coins.)
+- **Publish.** Tap ⇧ Publish — 15 → the "are you sure?" says the price, your
+  purse drops by 15, and the level appears on the other tablet after a reload.
+  The Publish button is gone (it isn't a draft any more). Spend down below 15 on
+  another draft → tapping Publish says how many more coins you need and the level
+  stays a draft. On an `editor` or `admin` account the same button reads just
+  **⇧ Publish**, asks without mentioning a price, and their purse doesn't move —
+  and no new file appears in `data/backups/`.
+- **Names.** Save a level with a name another level already has, in different
+  capitals → refused, and the message says which level has it. Tap 🎲 a few times
+  → different names, never one that's taken. A brand-new level opens with a name
+  already in the box.
+- **Stars.** ⭐ on one tablet, reload the other → the count agrees. Tap again →
+  it goes back. Switch the sort to **Most stars** → the list re-orders. Check the
+  🏆 Trophies board and your `coinsEarnedTotal`: **unchanged** — stars are never
+  worth coins.
+- **Hidden.** As an `editor`, tap 🚫 on somebody else's level → it vanishes from
+  New levels everywhere, and its owner sees "🚫 Hidden by a curator" on **My
+  levels**. 👁 puts it back. A `player` has no 🚫 at all — and `curl -X POST
+  .../hide` with that player's cookie is still refused.
+- **Adventures.** As a curator, 🗺 Adventures → ✚ New adventure → ➕ add three
+  published levels. On another account: the first is ▶ (lit up), the rest are 🔒
+  and can't be tapped. Beat the first → the second unlocks and it goes straight
+  there. ➖ a level they'd beaten → their score drops by one; ➕ it back → it
+  returns. Add a brand-new level at the **top** with ▲ → everybody's ▶ jumps back
+  to it. 🚫 a level in the middle → it shows as skipped and the adventure still
+  finishes. The score board shows cube + name + "N / M levels", and two people on
+  the same score share a place.
+- **Winning inside an adventure moves you ON.** Beat the frontier level and tap
+  → the *next* level starts, never the same one again (the game waits for the
+  server to be told you finished before it asks what's unlocked). Tap ← Menu on
+  the win screen instead → you land back **inside that adventure**, not at the
+  top of the menu. Delete an adventure and make another → the new one starts at
+  0 / N for everybody, with nothing already ticked.
+- **Coins are the same either way.** Beat a level inside an adventure, then beat
+  another standalone → the same coins for the same stars; a replay of either pays
+  nothing.
+- **Bounties.** 💰 on your own published level → the slider says "3 prizes of 20
+  = 60 coins", and putting it up takes 60 straight away. The card reads
+  `💰 20 × 3 left` for everybody. **Beat it yourself → nothing, and the count
+  does not move.** Three other accounts beat it → each sees "Bounty claimed:
+  +20!" on the win screen and the count goes 2, 1, 0. A fourth gets nothing. The
+  💰 button comes back once it's all been won.
+- **Racing a bounty.** Two tablets on the last slot, tapping Finish at the same
+  moment → exactly one gets paid, and `slotsLeft` lands on 0, never −1.
+- **Refunds.** Put a prize up, then 🚫 the level (or 🗑 it) → the unwon coins come
+  back to the owner's purse, and `coinsEarnedTotal` does **not** move (they were
+  already yours).
+- **Passwords.** With the server running, set somebody's `"passwordHash"` to
+  `null` in `data/accounts.json` → their name says "tap to claim" on the very
+  next reload, and picking a new password logs them in with everything intact.
+  **No restart.** Five wrong guesses still locks for 60 seconds.
+- **A crowded login screen.** With more than eight accounts, the login screen
+  shows the likeliest few (this tablet's last player first) plus a search box;
+  typing two letters finds anybody; the hint says how many more there are.
+- `READ_ONLY=true` also refuses publish, ⭐, prizes, hide, and every adventure
+  change — with the friendly message, and no purse moves.
 - The cube editor: each shape/face/trail/explosion changes the live preview; tap the
   preview to jump and **💀 Try it out** fires the explosion; the emoji face renders
   (check iPad Safari + Android Chrome).
@@ -969,8 +1291,6 @@ Two automatic checks, both run by `npm test`:
   row. A level saved before the limit opens with a red `30 / 25`, plays fine, and
   asks before trimming when you save. A hand-made `curl` save with too many coins
   is refused by the server.
-- Make a brand-new level → the bounty toast. Delete it and make another → **no**
-  second bounty. (Making a genuinely additional level does pay again.)
 - Cube shop: change one thing → the Save button shows the price and the itemised
   list; spend down until something is unaffordable → "Need N more" and the button
   is disabled; change your mind back → free again. Buy something and check the

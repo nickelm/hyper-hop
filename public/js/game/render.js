@@ -451,6 +451,13 @@ export function draw(view, dt) {
       ctx.fillText("+" + runCoinsEarned + " coins!", W/2, y); y += 34;
       ctx.fillStyle = "#fff"; ctx.font = "bold 22px Trebuchet MS";
     }
+    // Somebody had put a prize on this level for the first few people to
+    // beat it — and you were one of them!
+    if (view.runBounty > 0) {
+      ctx.fillStyle = "#ffd21a"; ctx.font = "bold 28px Trebuchet MS";
+      ctx.fillText("Bounty claimed: +" + view.runBounty + "! 💰", W/2, y); y += 34;
+      ctx.fillStyle = "#fff"; ctx.font = "bold 22px Trebuchet MS";
+    }
     // This level was played as its own character, and now that cube is yours
     // to wear whenever you like.
     if (view.runUnlocked) {

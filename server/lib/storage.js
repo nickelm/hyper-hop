@@ -17,7 +17,13 @@ const { normalizeLevel } = require("./validate");
 // ---------- Where things live on disk ----------
 // This file is server/lib/storage.js, so the project root — and its
 // data/ folder — is two levels up.
-const DATA_DIR = path.join(__dirname, "..", "..", "data");
+//
+// HH_DATA_DIR can point somewhere else. Nobody needs that to play the
+// game — it's how the tests (test/api.js) get a little pretend world of
+// their own to make a mess in, instead of scribbling on the real one.
+const DATA_DIR = process.env.HH_DATA_DIR
+  ? path.resolve(process.env.HH_DATA_DIR)
+  : path.join(__dirname, "..", "..", "data");
 const BACKUP_DIR = path.join(DATA_DIR, "backups");
 const KEEP_BACKUPS = 200;            // how many old copies of each file to keep
 
@@ -28,8 +34,16 @@ const KEEP_BACKUPS = 200;            // how many old copies of each file to keep
 const DEFAULT_PRICES = {
   startingCoins: 50,        // what every new player starts with
   coinValue: 1,             // how many coins one  *  in a level is worth
-  levelCreateBounty: 25,    // a thank-you for making a brand-new level
   maxCoinsPerLevel: 25,     // the most coins one level is allowed to hold
+  // Making a level is FREE — you build it as a draft, just for you. Showing it
+  // to everybody is what costs: that's the publish fee.
+  publishFee: 15,           // what it costs to publish one of your drafts
+  // A BOUNTY is a prize you put on your own level for the first few people who
+  // beat it. You pay for all the slots up front, so the prize is always really
+  // there. (bountyMin/Max are how big one prize may be.)
+  bountyMin: 5,
+  bountyMax: 100,
+  bountySlots: 3,           // how many people one bounty pays
   skin: {                   // what changing each part of your cube costs
     bodyColor: 5, outlineColor: 5, faceColor: 5,
     shape: 20, face: 10, emoji: 15, trail: 25, explosion: 25,
@@ -44,6 +58,8 @@ const DEFAULT_PRICES = {
 const FILES = {
   levels:   { name: "levels.json",   start: seedLevels,             note: "starter levels" },
   scores:   { name: "scores.json",   start: () => [],               note: "no high scores yet" },
+  stars:    { name: "stars.json",    start: () => [],               note: "nobody has starred a level yet" },
+  adventures: { name: "adventures.json", start: () => [],           note: "no adventures yet" },
   accounts: { name: "accounts.json", start: () => [],               note: "no players yet" },
   sessions: { name: "sessions.json", start: () => [],               note: "nobody logged in yet" },
   prices:   { name: "prices.json",   start: () => DEFAULT_PRICES,   note: "the shop price list" },
@@ -53,6 +69,8 @@ for (const key of Object.keys(FILES)) FILES[key].file = path.join(DATA_DIR, FILE
 
 const LEVELS_FILE = FILES.levels.file;
 const SCORES_FILE = FILES.scores.file;
+const STARS_FILE = FILES.stars.file;
+const ADVENTURES_FILE = FILES.adventures.file;
 const ACCOUNTS_FILE = FILES.accounts.file;
 const SESSIONS_FILE = FILES.sessions.file;
 const PRICES_FILE = FILES.prices.file;
@@ -147,6 +165,8 @@ const SEED = [
 ];
 
 // The starter levels, ready to save: numbered, tidied and stamped.
+// They start out "listed" — published already, because there is nobody to
+// publish them and the game should have something to play on day one.
 function seedLevels() {
   const now = new Date().toISOString();
   return SEED.map((L, i) => ({
@@ -156,6 +176,9 @@ function seedLevels() {
     level: normalizeLevel(L.level),
     song: L.song,
     ownerId: null,          // built-in levels belong to the game itself
+    status: "listed",       // everybody can see and play them
+    bounty: null,           // and nobody has put a prize on one
+    createdAt: now,
     updatedAt: now,
   }));
 }
@@ -169,14 +192,18 @@ function ensureData() {
     fs.writeFileSync(file, JSON.stringify(start(), null, 2));
     console.log("Created data/" + name + " (" + note + ").");
   }
-  // The level-id counter has to start ABOVE every level already saved,
-  // so a brand-new level can never reuse an old level's number.
+  // Each counter has to start ABOVE everything already saved, so a
+  // brand-new one can never reuse an old number. (See nextIdFor below
+  // for why reusing one would be so unkind.)
   const meta = readJson(META_FILE);
-  const biggest = readJson(LEVELS_FILE).reduce((m, L) => Math.max(m, Number(L.id) || 0), 0);
-  if (!(meta.nextLevelId > biggest)) {
-    meta.nextLevelId = biggest + 1;
-    fs.writeFileSync(META_FILE, JSON.stringify(meta, null, 2));
-  }
+  let changed = false;
+  const startAbove = (counterName, rows) => {
+    const biggest = rows.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
+    if (!(meta[counterName] > biggest)) { meta[counterName] = biggest + 1; changed = true; }
+  };
+  startAbove("nextLevelId", readJson(LEVELS_FILE));
+  startAbove("nextAdventureId", readJson(ADVENTURES_FILE));
+  if (changed) fs.writeFileSync(META_FILE, JSON.stringify(meta, null, 2));
 }
 
 function readJson(file) {
@@ -245,16 +272,27 @@ function updateJson(file, change) {
   return result;
 }
 
-// A level number that is NEVER used twice, even after a level is
-// deleted. (If numbers came back around, a brand-new level could look
-// like one you already got paid a bounty for.)
-function nextLevelId() {
+/* ----------------------------------------------------------------
+   NUMBERS THAT ARE NEVER USED TWICE, even after the thing is deleted.
+   We keep a counter in meta.json rather than saying "one more than the
+   biggest", because the biggest goes DOWN when you delete something and
+   the number would come back around.
+
+   That matters because other files remember these numbers. Everyone's
+   `collectedCoins` is keyed by level id and their `adventureProgress`
+   by adventure id — so a reused number would hand a brand-new level (or
+   a brand-new adventure) somebody else's history: levels already
+   ticked off, coins already "collected", prizes already claimed.
+   ---------------------------------------------------------------- */
+function nextIdFor(counterName) {
   return updateJson(META_FILE, meta => {
-    const id = meta.nextLevelId || 1;
-    meta.nextLevelId = id + 1;
+    const id = meta[counterName] || 1;
+    meta[counterName] = id + 1;
     return id;
   });
 }
+function nextLevelId() { return nextIdFor("nextLevelId"); }
+function nextAdventureId() { return nextIdFor("nextAdventureId"); }
 
 // ---------- Little helpers for our lists of {id, ...} rows ----------
 // The next free id: one more than the biggest id we already have.
@@ -267,8 +305,9 @@ function indexById(rows, id) {
 }
 
 module.exports = {
-  DATA_DIR, BACKUP_DIR, LEVELS_FILE, SCORES_FILE, PROFILES_FILE,
+  DATA_DIR, BACKUP_DIR, LEVELS_FILE, SCORES_FILE, STARS_FILE, ADVENTURES_FILE,
+  PROFILES_FILE,
   ACCOUNTS_FILE, SESSIONS_FILE, PRICES_FILE, META_FILE, DEFAULT_PRICES,
   ensureData, readJson, safeTimestamp, backupFile, writeJsonWithBackup,
-  updateJson, SKIP_SAVE, nextLevelId, nextId, indexById,
+  updateJson, SKIP_SAVE, nextLevelId, nextAdventureId, nextId, indexById,
 };

@@ -27,15 +27,31 @@ const READ_ONLY = process.env.READ_ONLY === "true";
      editor  a player who may also fix ANYBODY's level
      admin   an editor who also runs the world (level order, accounts)
 
+   The publish fee is for the KIDS: it's what makes you stop and think
+   before putting a level in front of everybody. A grown-up looking
+   after the game publishes for free — see "level.publishFree" below.
+
    To change somebody's job, open data/accounts.json in a text editor
    and change their "role" — then restart the server. There's no
    button for it on purpose: it's a grown-up job.
    ================================================================ */
 const ROLE_POWERS = {
-  player: ["level.create", "level.editOwn", "level.deleteOwn", "me.edit", "run.report"],
+  player: [
+    "level.create", "level.editOwn", "level.deleteOwn",
+    "level.publishOwn",     // show one of MY drafts to everybody (costs coins)
+    "level.bountyOwn",      // put a prize on MY published level (costs coins)
+    "level.star",           // say "I like this one"
+    "me.edit", "run.report",
+  ],
 };
-ROLE_POWERS.editor = [...ROLE_POWERS.player, "level.editAny", "level.deleteAny"];
-ROLE_POWERS.admin = [...ROLE_POWERS.editor, "level.reorder", "account.editAny"];
+ROLE_POWERS.editor = [...ROLE_POWERS.player,
+  "level.editAny", "level.deleteAny",
+  "level.hide",             // take a level off the list (and put it back)
+  "level.publishFree",      // publishing doesn't cost a grown-up anything
+  "adventure.manage",       // make and look after the adventures
+];
+ROLE_POWERS.admin = [...ROLE_POWERS.editor,
+  "level.reorder", "level.publishAny", "account.editAny"];
 
 // Everything this player is allowed to do: the powers that come with
 // their job, PLUS any extra ones written by hand in their
@@ -69,12 +85,43 @@ function can(account, action, thing) {
       return powers.has("level.editAny") || (powers.has("level.editOwn") && isMine);
     case "level.delete":
       return powers.has("level.deleteAny") || (powers.has("level.deleteOwn") && isMine);
+    case "level.publish":
+      return powers.has("level.publishAny") || (powers.has("level.publishOwn") && isMine);
+    // A bounty spends the LEVEL OWNER'S coins, so only the owner may put one
+    // on — not an editor, not even an admin. Nobody gets to spend somebody
+    // else's purse, however important their job is.
+    case "level.bounty":
+      return powers.has("level.bountyOwn") && isMine;
     case "account.edit":
       return powers.has("account.editAny") ||
         (powers.has("me.edit") && !!thing && Number(thing.id) === Number(account.id));
     default:
       return powers.has(action);      // create / reorder / run
   }
+}
+
+/* ----------------------------------------------------------------
+   WHO IS ALLOWED TO SEE THIS LEVEL AT ALL?
+
+     listed   everybody, logged in or not — that's what publishing means
+     draft    only the person building it
+     hidden   only its owner (who sees why) and the curators
+
+   A level nobody may see is left out of /api/levels completely, so a
+   draft is genuinely private: it isn't hidden by the buttons, it never
+   leaves the server. A level from before this existed has no status at
+   all, and counts as listed — nothing changed for anybody.
+   ---------------------------------------------------------------- */
+function visibleTo(level, account) {
+  const status = (level && level.status) || "listed";
+  if (status === "listed") return true;
+  if (account && level && Number(level.ownerId) === Number(account.id)) return true;
+  // A DRAFT is private, full stop — not even a curator sees it. There is
+  // nothing to moderate yet: nobody else can play it, so nobody can be
+  // upset by it. Curators get the hidden ones, which they are the whole
+  // reason for.
+  if (status === "draft") return false;
+  return !!account && powersOf(account).has("level.hide");
 }
 
 /* ================================================================
@@ -133,6 +180,10 @@ function publicAccount(a) {
     coins: a.coins,
     coinsEarnedTotal: a.coinsEarnedTotal,
     hasPassword: a.passwordHash != null,     // false = nobody has claimed this name yet
+    // When they last did anything. The login screen puts the people who
+    // have played recently at the front, so with lots of players you
+    // still usually find yourself without typing.
+    updatedAt: a.updatedAt,
   };
 }
 
@@ -153,5 +204,5 @@ function meView(a) {
 module.exports = {
   READ_ONLY, ROLE_POWERS,
   notFrozen, loadAccount, requireLogin, guard,
-  can, powersOf, publicAccount, meView,
+  can, powersOf, visibleTo, publicAccount, meView,
 };

@@ -15,8 +15,29 @@
 // single source of truth.
 const LEVEL_CHARS = new Set([".", "#", "^", "v", "o", "*", "|", "/", "\\", "L", "7", "=", "-", "p", "U", "s", "@", "!", ">", "<", "u", "n", "f", "c", "h", "g"]);
 const LEVEL_CHARS_HELP = [...LEVEL_CHARS].join(" ");   // "‎. # ^ o * | / \ = - ..." for error messages
-const MAX_COLS = 500;
+// How long a level may be. 2000 squares is about three and a half minutes of
+// running — a proper epic. The tablet knows this number too, as
+// CONFIG.MAX_LEVEL_COLS in public/js/config.js, so the ⏵ Wider button can stop
+// politely instead of the save failing: change one, change the other.
+const MAX_COLS = 2000;
 const MAX_ROWS = 30;
+/* ----------------------------------------------------------------
+   A LEVEL'S LIFE. Every level is in one of three places:
+
+     draft    you are still building it. Only YOU can see it, and it
+              costs nothing — this is where you fiddle about.
+     listed   you published it (for the publish fee), so everybody can
+              see it and play it.
+     hidden   a curator took it off the list because something was
+              wrong with it. It isn't deleted — the owner still sees it,
+              and a curator can put it back.
+
+   Nothing but the publish / hide / unhide routes ever changes this,
+   which is why validateLevel below does NOT hand back a status: saving
+   a level can never smuggle one through.
+   ---------------------------------------------------------------- */
+const LEVEL_STATUSES = new Set(["draft", "listed", "hidden"]);
+const MAX_LEVEL_NAME = 40;
 // A level's signs: what each  !  square says. The words are kept BESIDE the
 // grid (see cleanMessages), so the grid stays a plain rectangle of letters.
 const MAX_MESSAGES = 30;
@@ -181,6 +202,32 @@ function cleanReward(raw) {
   }
 }
 
+/* ----------------------------------------------------------------
+   IS THIS NAME FREE? Two levels called the same thing would be very
+   confusing — whose "Turbo Canyon" is on the trophy board? So a name
+   belongs to exactly one level, and CAPITAL LETTERS DON'T COUNT:
+   "turbo canyon" is the same name as "Turbo Canyon".
+
+   `exceptId` is the level doing the saving, so re-saving a level
+   without renaming it doesn't clash with itself.
+   ---------------------------------------------------------------- */
+function checkNameIsFree(name, levels, exceptId, canSee) {
+  if (!Array.isArray(levels)) return;                 // no list handed in = nothing to check
+  const wanted = name.trim().toLowerCase();
+  const clash = levels.find(L =>
+    String(L.name || "").trim().toLowerCase() === wanted &&
+    (exceptId == null || Number(L.id) !== Number(exceptId)));
+  if (!clash) return;
+  // We only NAME the level that has it if you'd be allowed to see that
+  // level anyway. Somebody else's draft is private, and "there's already
+  // a level called X" would tell you what they're building.
+  const mayName = typeof canSee !== "function" || canSee(clash);
+  throw new Error(mayName
+    ? "There's already a level called \"" + clash.name +
+      "\". Try another name — or tap 🎲 for a new one!"
+    : "Somebody is already using that name. Try another one — or tap 🎲 for a new one!");
+}
+
 // Check that a level is drawn with legal tiles and is not silly-huge.
 // Returns the cleaned-up {name, author, level, song, theme}, or throws
 // an Error with a message we are happy to show the kids.
@@ -190,9 +237,14 @@ function cleanReward(raw) {
 // (data/prices.json) and lib/prices.js already asks storage.js, which asks
 // us — so fetching it here would go round in a circle. Leave it out and
 // there is no coin limit at all, exactly as before.
+//
+// `limits.levels` (every level there is) and `limits.exceptId` (the one
+// being saved) are handed in the same way, for the "is this name free?"
+// check. Leave them out and names aren't checked at all.
 function validateLevel(body, limits = {}) {
-  const name = (body && typeof body.name === "string") ? body.name.trim() : "";
+  const name = (body && typeof body.name === "string") ? body.name.trim().slice(0, MAX_LEVEL_NAME) : "";
   if (!name) throw new Error("Please give the level a name.");
+  checkNameIsFree(name, limits.levels, limits.exceptId, limits.canSee);
 
   if (!body || typeof body.level !== "string") throw new Error("The level is missing its grid.");
   const level = normalizeLevel(body.level);
@@ -232,7 +284,7 @@ function validateLevel(body, limits = {}) {
   const song = Number.isFinite(body.song) ? Math.max(0, Math.floor(body.song)) : 0;
   const theme = Number.isFinite(body.theme) ? Math.max(0, Math.floor(body.theme)) : 0;
   return {
-    name: name.slice(0, 40),
+    name,                              // already trimmed and cut to length above
     author: (author || "Anonymous").slice(0, 40),
     level,
     song,
@@ -247,6 +299,57 @@ function validateLevel(body, limits = {}) {
     // USED to have a look really does take it away again.
     reward: cleanReward(body.reward),
   };
+}
+
+/* ----------------------------------------------------------------
+   A BOUNTY: a prize you put on your OWN level for the first few
+   people who beat it. You say how much each winner gets; the number of
+   winners and the two ends of "how much" come from the price list, so
+   a tablet never gets to decide any of it.
+
+   Unlike the signs and the looks, a silly bounty IS refused rather than
+   quietly fixed — this one costs real coins, so it has to be exactly
+   what the kid meant.
+   ---------------------------------------------------------------- */
+function validateBounty(body, prices) {
+  const amount = Number(body && body.amountPer);
+  if (!Number.isFinite(amount)) throw new Error("How many coins should the prize be?");
+  const each = Math.floor(amount);
+  if (each < prices.bountyMin || each > prices.bountyMax) {
+    throw new Error("A prize has to be between " + prices.bountyMin + " and " +
+                    prices.bountyMax + " coins.");
+  }
+  return { amountPer: each, slots: prices.bountySlots };
+}
+
+/* ----------------------------------------------------------------
+   AN ADVENTURE: a name and a list of levels to play in order. The
+   levels themselves are checked by the route (only LISTED ones may go
+   in), because that needs to see the level list.
+   ---------------------------------------------------------------- */
+const MAX_ADVENTURE_NAME = 40;
+function validateAdventure(body) {
+  const b = (body && typeof body === "object" && !Array.isArray(body)) ? body : {};
+  const patch = {};
+  if (b.name != null) {
+    const name = String(b.name).trim().slice(0, MAX_ADVENTURE_NAME);
+    if (!name) throw new Error("Please give the adventure a name.");
+    patch.name = name;
+  }
+  if (b.levelIds != null) {
+    if (!Array.isArray(b.levelIds)) throw new Error("That list of levels looks wrong.");
+    // Whole numbers only, and no level twice — playing the same level
+    // twice in one adventure would make the "how far have I got?" count
+    // mean two different things at once.
+    const ids = [];
+    for (const raw of b.levelIds) {
+      const id = Number(raw);
+      if (!Number.isFinite(id)) throw new Error("That list of levels looks wrong.");
+      if (!ids.includes(Math.floor(id))) ids.push(Math.floor(id));
+    }
+    patch.levelIds = ids;
+  }
+  return patch;
 }
 
 // A high score is one player's best on one level: which level, who, and how
@@ -353,7 +456,9 @@ function validateAccountEdit(body) {
 
 module.exports = {
   LEVEL_CHARS, MAX_COLS, MAX_ROWS, DEFAULT_SKIN, MAX_NAME, LEVEL_RULE_LIMITS,
-  normalizeLevel, validateLevel, validateScore,
+  LEVEL_STATUSES, MAX_LEVEL_NAME,
+  normalizeLevel, validateLevel, validateScore, checkNameIsFree,
+  validateBounty, validateAdventure,
   countEmoji, cleanSkin, cleanMessages, cleanReward, cleanLevelRules,
   coinKeysFor, validateName, validateAccountEdit,
 };

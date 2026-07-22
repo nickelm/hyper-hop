@@ -28,12 +28,32 @@ export function initEconomy({ onBalanceChanged } = {}) {
   if (onBalanceChanged) announce = onBalanceChanged;
 }
 
-// Take in whatever /api/me said about us.
+// Take in whatever /api/me said about us. This replaces EVERYTHING we
+// know, so only ever hand it a player the server just sent us — never
+// one built by hand out of bits, or the parts you didn't mention get
+// quietly wiped (that's what setBalance below is for).
 export function setWalletFromMe(me) {
   WALLET.balance = (me && me.coins) || 0;
   WALLET.earnedTotal = (me && me.coinsEarnedTotal) || 0;
   WALLET.collectedByLevel = (me && me.collectedCoins) || {};
   WALLET.looks = (me && me.looks) || [];
+  announce();
+}
+
+/* ----------------------------------------------------------------
+   JUST THE PURSE. When the server takes coins for something (publishing
+   a level, putting up a prize) it tells us the new balance and nothing
+   else — so we change the balance and nothing else.
+
+   This exists because doing it with setWalletFromMe was a real bug:
+   it would take the coins AND throw away which coins you'd collected
+   and which cubes you own, so a level you'd already emptied went back
+   to showing gold coins and a cube you owned asked to be paid for
+   again.
+   ---------------------------------------------------------------- */
+export function setBalance(coins, earnedTotal) {
+  if (Number.isFinite(coins)) WALLET.balance = coins;
+  if (Number.isFinite(earnedTotal)) WALLET.earnedTotal = earnedTotal;
   announce();
 }
 
@@ -77,17 +97,22 @@ export function alreadyEarned(levelId) {
    and sends back how many coins it actually paid ("credited"), which
    may be fewer than we collected — coins only ever pay once.
 
-   Finishing is also how you win a level's look, so the answer can
-   carry an `unlocked` cube as well. We hand both back together:
-   { credited, unlocked }.
+   Finishing is also how you win a level's look, how you win a prize
+   somebody put on the level, and how the next level of an adventure
+   unlocks. So the answer can carry an `unlocked` cube and a `bounty`
+   as well, and we hand them all back together.
    ---------------------------------------------------------------- */
-export async function reportRun(levelId, coinKeys, completed) {
-  if (levelId == null) return { credited: 0, unlocked: null };   // a test run — never counts
+export async function reportRun(levelId, coinKeys, completed, adventureId) {
+  // A test run from the editor never counts for anything.
+  if (levelId == null) return { credited: 0, unlocked: null, bounty: 0 };
   try {
     const answer = await apiPost("/runs", {
       levelId,
       collectedCoinKeys: [...coinKeys],
       completed: !!completed,
+      // Which adventure we're playing, if any. The server checks that we
+      // were really allowed to be on this level before it counts.
+      adventureId: adventureId != null ? adventureId : undefined,
     });
     WALLET.balance = answer.balance;
     WALLET.earnedTotal = answer.coinsEarnedTotal;
@@ -106,9 +131,14 @@ export async function reportRun(levelId, coinKeys, completed) {
         { skin: answer.unlocked.skin, name: answer.unlocked.name, from: "level" }];
     }
     announce();
-    return { credited: answer.credited || 0, unlocked: answer.unlocked || null };
+    return {
+      credited: answer.credited || 0,
+      unlocked: answer.unlocked || null,
+      bounty: answer.bounty || 0,
+    };
   } catch (e) {
-    return { credited: 0, unlocked: null };   // a lost coin report is no big deal — keep playing
+    // A lost coin report is no big deal — keep playing.
+    return { credited: 0, unlocked: null, bounty: 0 };
   }
 }
 
@@ -150,4 +180,28 @@ const DEFAULT_MAX_COINS = 25;
 export function maxCoinsPerLevel() {
   const most = WALLET.prices && WALLET.prices.maxCoinsPerLevel;
   return Number.isFinite(most) ? most : DEFAULT_MAX_COINS;
+}
+
+/* ----------------------------------------------------------------
+   WHAT IT COSTS TO SHOW A LEVEL TO EVERYBODY. Making levels is free;
+   publishing one is the thing you spend coins on. As always the server
+   is what really charges — this is so the button can say the price
+   before you tap it.
+   ---------------------------------------------------------------- */
+const DEFAULT_PUBLISH_FEE = 15;
+export function publishFee() {
+  const fee = WALLET.prices && WALLET.prices.publishFee;
+  return Number.isFinite(fee) ? fee : DEFAULT_PUBLISH_FEE;
+}
+
+// How big a prize may be, and how many people one prize pays. The
+// slider in the bounty pop-up uses these for its two ends.
+const DEFAULT_BOUNTY = { min: 5, max: 100, slots: 3 };
+export function bountyBounds() {
+  const p = WALLET.prices || {};
+  return {
+    min: Number.isFinite(p.bountyMin) ? p.bountyMin : DEFAULT_BOUNTY.min,
+    max: Number.isFinite(p.bountyMax) ? p.bountyMax : DEFAULT_BOUNTY.max,
+    slots: Number.isFinite(p.bountySlots) ? p.bountySlots : DEFAULT_BOUNTY.slots,
+  };
 }

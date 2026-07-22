@@ -54,6 +54,9 @@ export const CONFIG = {
   // ---------- SIZES ----------
   LEVEL_ROWS: 14,         // how many squares tall the sky is. 14 fills a tablet screen nicely.
                           // Bigger = more room to fly, but everything looks smaller
+  MAX_LEVEL_COLS: 2000,   // how LONG a level may be. 2000 squares is about three and a
+                          // half minutes of running. The server knows this number too
+                          // (MAX_COLS in server/lib/validate.js) — change one, change both
   TILE: 40,               // size of one grid square. Everything is built from these
   PLAYER_SIZE: 34,        // how big the cube is (should be a bit smaller than TILE)
   SPIKE_MERCY: 0.35,      // how forgiving spikes are (0 = brutal, 0.5 = very kind)
